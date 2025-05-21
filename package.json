@@ -1,0 +1,59 @@
+{
+  "name": "@kne/fastify-trtc-conference",
+  "version": "1.0.0",
+  "description": "用于实现一个trtc的视频会议系统",
+  "main": "index.js",
+  "scripts": {
+    "init": "husky",
+    "dev": "nodemon ./index.js",
+    "start": "node ./index.js",
+    "build:md": "npx @kne/md-doc",
+    "start:md": "npx @kne/md-doc --watch",
+    "prettier": "prettier --config .prettierrc --write '{libs/**/*,index}.{js,jsx,ts,tsx,json,css,scss}'",
+    "lint-staged": "npx lint-staged"
+  },
+  "lint-staged": {
+    "**/*.md": [
+      "git add"
+    ],
+    "{libs/**/*,index}.{js,jsx,ts,tsx,json,css,scss}": [
+      "prettier --config .prettierrc --write",
+      "git add"
+    ]
+  },
+  "files": [
+    "index.js",
+    "libs"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/kne-union/fastify-trtc-conference.git"
+  },
+  "keywords": [],
+  "author": "linzp",
+  "license": "ISC",
+  "bugs": {
+    "url": "https://github.com/kne-union/fastify-trtc-conference/issues"
+  },
+  "homepage": "https://github.com/kne-union/fastify-trtc-conference#readme",
+  "peerDependencies": {
+    "@kne/fastify-namespace": "*",
+    "@kne/fastify-sequelize": "*",
+    "fastify-plugin": ">=5"
+  },
+  "devDependencies": {
+    "@fastify/env": "^4.4.0",
+    "@kne/fastify-sequelize": "^2.0.1",
+    "fastify": "^5.3.2",
+    "fastify-plugin": "^5.0.1",
+    "husky": "^9.0.11",
+    "nodemon": "^3.1.3",
+    "prettier": "^3.2.5",
+    "sqlite3": "^5.1.7"
+  },
+  "dependencies": {
+    "@kne/fastify-shorten": "^1.0.7",
+    "dayjs": "^1.11.13",
+    "tls-sig-api-v2": "^1.0.2"
+  }
+}
