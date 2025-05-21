@@ -3,6 +3,7 @@ const fp = require('fastify-plugin');
 module.exports = fp(async (fastify, options) => {
   const { services } = fastify[options.name];
   const { authenticate } = fastify[options.shortenName];
+  const userAuthenticate = options.getUserAuthenticate();
   fastify.get(
     `${options.prefix}/detail`,
     {
@@ -130,7 +131,7 @@ module.exports = fp(async (fastify, options) => {
   fastify.get(
     `${options.prefix}/list`,
     {
-      onRequest: [fastify.account.authenticate.user],
+      onRequest: [userAuthenticate],
       schema: {
         summary: '获取会议列表',
         query: {
@@ -150,7 +151,7 @@ module.exports = fp(async (fastify, options) => {
   fastify.post(
     `${options.prefix}/create`,
     {
-      onRequest: [fastify.account.authenticate.user],
+      onRequest: [userAuthenticate],
       schema: {
         summary: '创建会议',
         body: {
