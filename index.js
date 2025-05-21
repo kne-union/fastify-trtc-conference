@@ -31,7 +31,7 @@ module.exports = fp(async (fastify, options) => {
 
   fastify.register(require('@kne/fastify-namespace'), {
     options,
-    name: 'videoConference',
+    name: options.name,
     modules: [
       ['controllers', path.resolve(__dirname, './libs/controllers')],
       [

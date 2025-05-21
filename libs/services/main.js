@@ -9,7 +9,7 @@ module.exports = fp(async (fastify, options) => {
   //SecretKey
   const getUserSig = userId => {
     const api = new TLSSigAPIv2.Api(options.appId, options.appSecret);
-    const userSig = api.genUserSig(userId,options.expire);
+    const userSig = api.genUserSig(userId, options.expire);
     return {
       sdkAppId: fastify.config.APP_ID,
       userId,
@@ -17,7 +17,7 @@ module.exports = fp(async (fastify, options) => {
     };
   };
 
-  const createConference = async (authenticatePayload, { includingMe, name, startTime, duration, isInvitationAllowed, origin, maxCount, options, members = [] }) => {
+  const createConference = async (authenticatePayload, { includingMe, name, startTime, duration, isInvitationAllowed, origin, maxCount, options: conferenceOptions, members = [] }) => {
     const { id, nickname, email, avatar } = authenticatePayload;
     if (!includingMe && !(members && members.find(item => item.isMaster))) {
       throw new Error('At least one master is needed');
@@ -33,7 +33,7 @@ module.exports = fp(async (fastify, options) => {
       isInvitationAllowed,
       origin,
       maxCount,
-      options,
+      options: conferenceOptions,
       userId: id
     });
 
