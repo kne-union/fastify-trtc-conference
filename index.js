@@ -13,9 +13,15 @@ module.exports = fp(async (fastify, options) => {
       appId: '',
       appSecret: '',
       expire: 3 * 60 * 60,
+      getUserAuthenticate: () => {
+        if (!fastify.account) {
+          throw new Error('fastify-account plugin must be registered before fastify-trtc-conference,or set options.getUserAuthenticate');
+        }
+        return fastify.account.authenticate.user;
+      },
       getUserModel: () => {
         if (!fastify.account) {
-          throw new Error('fastify-account plugin must be registered before fastify-video-conference,or set options.getUserModel');
+          throw new Error('fastify-account plugin must be registered before fastify-trtc-conference,or set options.getUserModel');
         }
         return fastify.account.models.user;
       }
