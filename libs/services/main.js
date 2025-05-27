@@ -71,6 +71,38 @@ module.exports = fp(async (fastify, options) => {
     });
   };
 
+  const saveConference = async (authenticatePayload, { id, name, duration, isInvitationAllowed, maxCount, options: conferenceOptions }) => {
+    const { id: userId } = authenticatePayload;
+    const conference = await getConference({ id });
+    if (conference.userId !== userId) {
+      throw new Error('Data has expired, please refresh the page and try again');
+    }
+    conference.name = name;
+    if (conference.duration > duration) {
+      throw new Error('Duration cannot be less than before');
+    }
+    conference.duration = duration;
+    conference.isInvitationAllowed = isInvitationAllowed;
+    if (conference.maxCount > maxCount) {
+      throw new Error('MaxCount cannot be less than before');
+    }
+    conference.maxCount = maxCount;
+    conference.options = conferenceOptions;
+    await conference.save();
+
+    return Object.assign({}, conference.toJSON());
+  };
+
+  const deleteConference = async (authenticatePayload, { id }) => {
+    const { id: userId } = authenticatePayload;
+    const conference = await getConference({ id });
+    if (conference.userId !== userId) {
+      throw new Error('Data has expired, please refresh the page and try again');
+    }
+    await conference.destroy();
+    return {};
+  };
+
   const getConferenceList = async (authenticatePayload, { perPage, currentPage }) => {
     const { id } = authenticatePayload;
     const { rows, count } = await models.conference.findAndCountAll({
@@ -205,6 +237,9 @@ module.exports = fp(async (fastify, options) => {
       })
     );
 
+    newMember.shorten = shorten;
+    await newMember.save();
+
     return { shorten };
   };
 
@@ -263,6 +298,8 @@ module.exports = fp(async (fastify, options) => {
   Object.assign(fastify[options.name].services, {
     getUserSig,
     createConference,
+    saveConference,
+    deleteConference,
     getConferenceList,
     getConferenceDetail,
     enterConference,

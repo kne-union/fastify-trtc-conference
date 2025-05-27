@@ -187,12 +187,70 @@ module.exports = fp(async (fastify, options) => {
                 documentVisibleAll: { type: 'boolean', description: '是否允许所有人查看文档', default: false }
               }
             }
-          }
+          },
+          required: ['name']
         }
       }
     },
     async request => {
       return services.createConference(request.userInfo, request.body);
+    }
+  );
+
+  fastify.post(
+    `${options.prefix}/save`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        summary: '修改会议',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            name: { type: 'string' },
+            startTime: {
+              type: 'string',
+              format: 'date-time',
+              description: '会议开始时间,格式:YYYY-MM-DDTHH:mm:ss.sssZ'
+            },
+            duration: { type: 'number', description: '会议时长,单位:秒' },
+            isInvitationAllowed: { type: 'boolean', description: '是否允许邀请' },
+            maxCount: { type: 'number', description: '最大人数' },
+            options: {
+              type: 'object',
+              description: '会议选项',
+              properties: {
+                document: { type: 'array', description: '会议输入文档', items: { type: 'object' } },
+                documentVisibleAll: { type: 'boolean', description: '是否允许所有人查看文档', default: false }
+              }
+            }
+          },
+          required: ['id', 'name']
+        }
+      }
+    },
+    async request => {
+      return services.saveConference(request.userInfo, request.body);
+    }
+  );
+
+  fastify.post(
+    `${options.prefix}/delete`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        summary: '删除会议',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.deleteConference(request.userInfo, request.body);
     }
   );
 });
