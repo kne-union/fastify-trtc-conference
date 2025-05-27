@@ -282,14 +282,6 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('Only the master can end the conference');
     }
     const confidence = await getConference({ id: conferenceId });
-    const memberList = await models.member.findAll({ where: { conferenceId: confidence.id } });
-    await Promise.all(
-      memberList.map(async member => {
-        if (member.shorten) {
-          await fastify[options.shortenName].services.remove(member.shorten);
-        }
-      })
-    );
     confidence.status = 1;
     await confidence.save();
     //调用trtc服务端接口结束会议
