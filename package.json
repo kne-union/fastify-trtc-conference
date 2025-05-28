@@ -1,6 +1,6 @@
 {
   "name": "@kne/fastify-trtc-conference",
-  "version": "1.0.4",
+  "version": "1.0.5",
   "description": "用于实现一个trtc的视频会议系统",
   "main": "index.js",
   "scripts": {
@@ -52,7 +52,7 @@
     "sqlite3": "^5.1.7"
   },
   "dependencies": {
-    "@kne/fastify-shorten": "^1.0.10",
+    "@kne/fastify-shorten": "^1.0.11",
     "dayjs": "^1.11.13",
     "tls-sig-api-v2": "^1.0.2"
   }
