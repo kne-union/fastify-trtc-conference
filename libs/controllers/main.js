@@ -253,4 +253,45 @@ module.exports = fp(async (fastify, options) => {
       return services.deleteConference(request.userInfo, request.body);
     }
   );
+
+  fastify.get(
+    `${options.prefix}/getMemberShorten`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        summary: '获取会议成员短链接',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getMemberShorten(request.userInfo, request.query);
+    }
+  );
+
+  fastify.post(
+    `${options.prefix}/inviteMemberFormUser`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        description: '用户邀请参会人',
+        summary: '用户邀请参会人',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.inviteMemberFormUser(request.userInfo, request.body);
+    }
+  );
 });

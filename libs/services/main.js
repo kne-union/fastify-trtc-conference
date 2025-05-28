@@ -106,7 +106,12 @@ module.exports = fp(async (fastify, options) => {
 
   const getConferenceList = async (authenticatePayload, { perPage, currentPage }) => {
     const { id } = authenticatePayload;
-    const { rows, count } = await models.conference.findAndCountAll({
+    const count = await models.conference.count({
+      where: {
+        userId: id
+      }
+    });
+    const rows = await models.conference.findAll({
       where: {
         userId: id
       },
@@ -162,7 +167,7 @@ module.exports = fp(async (fastify, options) => {
   };
 
   const getConferenceDetail = async authenticatePayload => {
-    const { id, conferenceId, inviterId } = authenticatePayload;
+    const { id, conferenceId, fromUser, inviterId, inviter: userInviter } = authenticatePayload;
     const conference = await getConference({ id: conferenceId });
     if (conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
       conference.status = 1;
@@ -170,7 +175,7 @@ module.exports = fp(async (fastify, options) => {
     }
 
     const member = id && (await getMember({ id }));
-    const inviter = inviterId && (await getMember({ id: inviterId }));
+    const inviter = fromUser ? userInviter : inviterId && (await getMember({ id: inviterId }));
     return { conference, member, inviter };
   };
 
@@ -204,12 +209,63 @@ module.exports = fp(async (fastify, options) => {
     };
   };
 
-  const joinConference = async (authenticatePayload, data) => {
-    const { inviterId, conferenceId } = authenticatePayload;
-    const member = await getMember({ id: inviterId, conferenceId });
+  const inviteMemberFormUser = async (authenticatePayload, { id }) => {
+    const conference = await getConference({ id, status: 0 });
+    if (conference.userId !== authenticatePayload.id) {
+      throw new Error('Only the conference creator can perform this operation');
+    }
+    const shorten = await fastify[options.shortenName].services.sign(
+      JSON.stringify({
+        conferenceId: id,
+        fromUser: true,
+        inviter: {
+          fromUser: true,
+          nickname: authenticatePayload.nickname || authenticatePayload.email
+        }
+      }),
+      dayjs().add(1, 'month').toDate()
+    );
+    return {
+      shorten,
+      inviter: {
+        fromUser: true,
+        nickname: authenticatePayload.nickname || authenticatePayload.email
+      },
+      conference
+    };
+  };
 
-    if (!member.isMaster) {
-      throw new Error('Only the master can invite members');
+  const getMemberShorten = async (authenticatePayload, { id }) => {
+    const { id: userId } = authenticatePayload;
+    const member = await getMember({ id });
+    const conference = await getConference({ id: member.conferenceId, status: 0 });
+    if (conference.userId !== userId) {
+      throw new Error('Only the conference creator can perform this operation');
+    }
+
+    const shorten = await fastify[options.shortenName].services.sign(
+      JSON.stringify({
+        id: member.id,
+        conferenceId: member.conferenceId,
+        isMaster: member.isMaster
+      }),
+      dayjs().add(1, 'month').toDate()
+    );
+
+    member.shorten = shorten;
+    await member.save();
+    return { shorten };
+  };
+
+  const joinConference = async (authenticatePayload, data) => {
+    const { inviterId, conferenceId, fromUser } = authenticatePayload;
+    if (!fromUser) {
+      // fromUser为true说明是会议创建者邀请，否则为主持人邀请
+      const member = await getMember({ id: inviterId, conferenceId });
+
+      if (!member.isMaster) {
+        throw new Error('Only the master can invite members');
+      }
     }
 
     //检查会议是不是已经开始
@@ -299,6 +355,8 @@ module.exports = fp(async (fastify, options) => {
     enterConference,
     saveMember,
     inviteMember,
+    inviteMemberFormUser,
+    getMemberShorten,
     getConference,
     joinConference,
     removeMember,
