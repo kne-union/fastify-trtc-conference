@@ -62,7 +62,8 @@ module.exports = fp(async (fastify, options) => {
               id: member.id,
               conferenceId: member.conferenceId,
               isMaster: member.isMaster
-            })
+            }),
+            dayjs().add(1, 'month').toDate()
           );
           await member.save();
           return Object.assign({}, member.toJSON());
@@ -194,7 +195,7 @@ module.exports = fp(async (fastify, options) => {
         conferenceId,
         inviterId: id
       }),
-      dayjs().add(24, 'hour').toDate()
+      dayjs().add(1, 'month').toDate()
     );
     return {
       shorten,
@@ -234,7 +235,8 @@ module.exports = fp(async (fastify, options) => {
         id: newMember.id,
         conferenceId: newMember.conferenceId,
         isMaster: false
-      })
+      }),
+      dayjs().add(1, 'month').toDate()
     );
 
     newMember.shorten = shorten;
