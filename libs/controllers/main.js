@@ -193,7 +193,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.createConference(request.userInfo, request.body);
+      return services.createConference(options.getUserInfo(request), request.body);
     }
   );
 
@@ -230,7 +230,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.saveConference(request.userInfo, request.body);
+      return services.saveConference(options.getUserInfo(request), request.body);
     }
   );
 
@@ -250,7 +250,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.deleteConference(request.userInfo, request.body);
+      return services.deleteConference(options.getUserInfo(request), request.body);
     }
   );
 
@@ -270,7 +270,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.getMemberShorten(request.userInfo, request.query);
+      return services.getMemberShorten(options.getUserInfo(request), request.query);
     }
   );
 
@@ -291,7 +291,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.inviteMemberFormUser(request.userInfo, request.body);
+      return services.inviteMemberFormUser(options.getUserInfo(request), request.body);
     }
   );
 });
