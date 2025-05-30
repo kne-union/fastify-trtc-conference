@@ -2,19 +2,53 @@ const fp = require('fastify-plugin');
 const TLSSigAPIv2 = require('tls-sig-api-v2');
 const dayjs = require('dayjs');
 const duration = require('dayjs/plugin/duration');
+const tencentcloud = require('tencentcloud-sdk-nodejs-trtc');
+const get = require('lodash/get');
+const uniqBy = require('lodash/uniqBy');
 dayjs.extend(duration);
+const TrtcClient = tencentcloud.trtc.v20190722.Client;
+const COS = require('cos-nodejs-sdk-v5');
+const path = require('path');
 
 module.exports = fp(async (fastify, options) => {
   const { models } = fastify[options.name];
+  const getTrtcParams = props => {
+    return options.getParams(Object.assign({}, props));
+  };
+
   //SecretKey
-  const getUserSig = userId => {
-    const api = new TLSSigAPIv2.Api(options.appId, options.appSecret);
-    const userSig = api.genUserSig(userId, options.expire);
+  const getUserSig = (userId, props) => {
+    const { appId, appSecret, expire } = getTrtcParams(props);
+    const api = new TLSSigAPIv2.Api(appId, appSecret);
+    const userSig = api.genUserSig(userId, expire || 60 * 10);
     return {
-      sdkAppId: fastify.config.APP_ID,
+      sdkAppId: appId,
       userId,
       userSig
     };
+  };
+
+  let trtcClient;
+
+  const getTrtcClient = () => {
+    if (trtcClient) {
+      return trtcClient;
+    }
+    trtcClient = new TrtcClient(options.tencentcloud);
+    return trtcClient;
+  };
+
+  let cosClient;
+
+  const getCosClient = () => {
+    if (cosClient) {
+      return cosClient;
+    }
+    cosClient = new COS({
+      SecretId: get(options, 'tencentcloud.credential.secretId'),
+      SecretKey: get(options, 'tencentcloud.credential.secretKey')
+    });
+    return cosClient;
   };
 
   const createConference = async (authenticatePayload, { includingMe, name, startTime, duration, isInvitationAllowed, origin, maxCount, options: conferenceOptions, members = [] }) => {
@@ -314,7 +348,14 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('The conference has ended');
     }
 
-    return Object.assign({}, { member, conference, sign: getUserSig(id) });
+    return Object.assign(
+      {},
+      {
+        member,
+        conference,
+        sign: getUserSig(id, conference.options?.setting)
+      }
+    );
   };
 
   const removeMember = async (authenticatePayload, { id }) => {
@@ -332,6 +373,13 @@ module.exports = fp(async (fastify, options) => {
     }
     await member.destroy();
     //检查成员是否已经进入会议，调用trtc服务端接口踢出用户
+    const client = getTrtcClient();
+    const { appId } = getTrtcParams(conference.options?.setting);
+    await client.RemoveUserByStrRoomId({
+      SdkAppId: appId,
+      RoomId: conference.id,
+      UserIds: [member.id]
+    });
   };
 
   const endConference = async authenticatePayload => {
@@ -339,13 +387,82 @@ module.exports = fp(async (fastify, options) => {
     if (!isMaster) {
       throw new Error('Only the master can end the conference');
     }
-    const confidence = await getConference({ id: conferenceId });
-    confidence.status = 1;
-    await confidence.save();
-    //调用trtc服务端接口结束会议
+    const conference = await getConference({ id: conferenceId });
+    conference.status = 1;
+    await conference.save();
+    const client = getTrtcClient();
+    // 调用TRTC服务端API结束会议
+    const { appId } = getTrtcParams(conference.options?.setting);
+    await client.DismissRoomByStrRoomId({
+      SdkAppId: appId,
+      RoomId: conferenceId
+    });
+  };
+
+  const syncRecordFiles = async () => {
+    const cosClient = getCosClient();
+    try {
+      const { Contents } = await cosClient.getBucket({
+        Bucket: get(options, 'tencentcloud.cos.bucket'),
+        Region: get(options, 'tencentcloud.cos.region')
+      });
+      await Promise.all(
+        Contents.map(async item => {
+          const url = cosClient.getObjectUrl({
+            Bucket: get(options, 'tencentcloud.cos.bucket'),
+            Region: get(options, 'tencentcloud.cos.region'),
+            Key: item.Key,
+            Sign: true
+          });
+          const filename = path.basename(url).split('?')[0];
+          const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
+          const [_, SdkAppId, RoomId, UserId, MediaId] = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
+
+          const decode = input => {
+            const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
+            return Buffer.from(replaced, 'base64').toString('utf8');
+          };
+          const { id: fileId } = await fastify.fileManager.services.uploadFromUrl({ url });
+          const conferenceId = decode(RoomId);
+          const memberId = decode(UserId);
+          const conference = await getConference({ id: conferenceId });
+          if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
+            conference.status = 1;
+            await conference.save();
+          }
+
+          if (conference.status === 0) {
+            return;
+          }
+
+          const target = {
+            fileId,
+            filename
+          };
+          const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
+          list.push(target);
+          conference.options = Object.assign({}, conference.options, {
+            recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
+              [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
+                [`${MediaId}`]: uniqBy(list, 'fileId')
+              })
+            })
+          });
+          await conference.save();
+          await cosClient.deleteObject({
+            Bucket: get(options, 'tencentcloud.cos.bucket'),
+            Region: get(options, 'tencentcloud.cos.region'),
+            Key: item.Key
+          });
+        })
+      );
+    } catch (e) {
+      console.error(e);
+    }
   };
 
   Object.assign(fastify[options.name].services, {
+    syncRecordFiles,
     getUserSig,
     createConference,
     saveConference,

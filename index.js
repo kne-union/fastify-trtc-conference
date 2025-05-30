@@ -13,6 +13,7 @@ module.exports = fp(async (fastify, options) => {
       appId: '',
       appSecret: '',
       expire: 3 * 60 * 60,
+      syncCron: '*/10 * * * *',
       getUserAuthenticate: () => {
         if (!fastify.account) {
           throw new Error('fastify-account plugin must be registered before fastify-trtc-conference,or set options.getUserAuthenticate');
@@ -50,4 +51,22 @@ module.exports = fp(async (fastify, options) => {
       ['services', path.resolve(__dirname, './libs/services')]
     ]
   });
+
+  fastify.register(
+    require('fastify-plugin')(async fastify => {
+      options.syncCron &&
+        fastify.register(require('fastify-cron'), {
+          jobs: [
+            {
+              cronTime: options.syncCron,
+              onTick: async () => {
+                console.log('sync record files');
+                const { syncRecordFiles } = fastify[options.name].services;
+                await syncRecordFiles();
+              }
+            }
+          ]
+        });
+    })
+  );
 });
