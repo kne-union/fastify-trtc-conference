@@ -39,7 +39,9 @@ module.exports = ({ DataTypes, options }) => {
     },
     associate: ({ conference, member }) => {
       conference.hasMany(member);
-      conference.belongsTo(options.getUserModel());
+      conference.belongsTo(options.getUserModel(), {
+        foreignKey: 'userId'
+      });
     },
     options: {
       comment: '会议'
