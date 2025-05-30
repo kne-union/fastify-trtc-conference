@@ -20,6 +20,9 @@ module.exports = fp(async (fastify, options) => {
         }
         return fastify.account.authenticate.user;
       },
+      getUserInfo: request => {
+        return request.userInfo;
+      },
       getUserModel: () => {
         if (!fastify.account) {
           throw new Error('fastify-account plugin must be registered before fastify-trtc-conference,or set options.getUserModel');
