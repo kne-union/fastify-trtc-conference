@@ -66,7 +66,8 @@ module.exports = fp(async (fastify, options) => {
                 console.log('sync record files');
                 const { syncRecordFiles } = fastify[options.name].services;
                 await syncRecordFiles();
-              }
+              },
+              start: true
             }
           ]
         });
