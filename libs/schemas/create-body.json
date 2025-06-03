@@ -1,0 +1,68 @@
+{
+  "type": "object",
+  "properties": {
+    "name": {
+      "type": "string"
+    },
+    "startTime": {
+      "type": "string",
+      "format": "date-time",
+      "description": "会议开始时间,格式:YYYY-MM-DDTHH:mm:ss.sssZ"
+    },
+    "duration": {
+      "type": "number",
+      "description": "会议时长,单位:秒"
+    },
+    "isInvitationAllowed": {
+      "type": "boolean",
+      "description": "是否允许邀请"
+    },
+    "maxCount": {
+      "type": "number",
+      "description": "最大人数"
+    },
+    "members": {
+      "type": "array",
+      "description": "会议成员",
+      "default": [],
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": {
+            "type": "string",
+            "description": "用户名称"
+          },
+          "email": {
+            "type": "string",
+            "description": "用户邮箱"
+          },
+          "isMaster": {
+            "type": "boolean",
+            "description": "是否是主持人"
+          }
+        }
+      }
+    },
+    "options": {
+      "type": "object",
+      "description": "会议选项",
+      "properties": {
+        "document": {
+          "type": "array",
+          "description": "会议输入文档",
+          "items": {
+            "type": "object"
+          }
+        },
+        "documentVisibleAll": {
+          "type": "boolean",
+          "description": "是否允许所有人查看文档",
+          "default": false
+        }
+      }
+    }
+  },
+  "required": [
+    "name"
+  ]
+}

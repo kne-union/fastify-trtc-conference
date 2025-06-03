@@ -14,6 +14,12 @@ module.exports = fp(async (fastify, options) => {
       appSecret: '',
       expire: 3 * 60 * 60,
       syncCron: '*/10 * * * *',
+      getOpenApiAuthenticate: () => {
+        if (!fastify.signature) {
+          throw new Error('fastify-signature plugin must be registered before fastify-trtc-conference,or set options.getUserAuthenticate');
+        }
+        return fastify.signature.authenticate.openApi;
+      },
       getUserAuthenticate: () => {
         if (!fastify.account) {
           throw new Error('fastify-account plugin must be registered before fastify-trtc-conference,or set options.getUserAuthenticate');
