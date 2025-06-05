@@ -120,11 +120,17 @@ module.exports = fp(async (fastify, options) => {
       onRequest: [authenticate.code],
       schema: {
         description: '结束会议',
-        summary: '结束会议'
+        summary: '结束会议',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          }
+        }
       }
     },
     async request => {
-      await services.endConference(request.authenticatePayload);
+      await services.endConference(request.authenticatePayload, request.body);
       return {};
     }
   );

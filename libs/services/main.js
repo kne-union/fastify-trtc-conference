@@ -382,8 +382,11 @@ module.exports = fp(async (fastify, options) => {
     });
   };
 
-  const endConference = async authenticatePayload => {
+  const endConference = async (authenticatePayload, { id }) => {
     const { conferenceId, isMaster } = authenticatePayload;
+    if (conferenceId !== id) {
+      throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
+    }
     if (!isMaster) {
       throw new Error('Only the master can end the conference');
     }
@@ -442,6 +445,7 @@ module.exports = fp(async (fastify, options) => {
           const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
           list.push(target);
           conference.options = Object.assign({}, conference.options, {
+            recordFilesAchieved: true,
             recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
               [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
                 [`${MediaId}`]: uniqBy(list, 'fileId')
