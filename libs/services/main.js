@@ -382,8 +382,11 @@ module.exports = fp(async (fastify, options) => {
     });
   };
 
-  const endConference = async authenticatePayload => {
+  const endConference = async (authenticatePayload, { id }) => {
     const { conferenceId, isMaster } = authenticatePayload;
+    if (conferenceId !== id) {
+      throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
+    }
     if (!isMaster) {
       throw new Error('Only the master can end the conference');
     }
