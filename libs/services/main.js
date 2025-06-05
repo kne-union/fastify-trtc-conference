@@ -445,6 +445,7 @@ module.exports = fp(async (fastify, options) => {
           const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
           list.push(target);
           conference.options = Object.assign({}, conference.options, {
+            recordFilesAchieved: true,
             recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
               [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
                 [`${MediaId}`]: uniqBy(list, 'fileId')
