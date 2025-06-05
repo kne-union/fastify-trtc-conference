@@ -4,6 +4,18 @@ const createBodySchema = require('../schemas/create-body.json');
 module.exports = fp(async (fastify, options) => {
   const { services } = fastify[options.name];
   const openApiAuthenticate = options.getOpenApiAuthenticate();
+  fastify.get(
+    `${options.prefix}/open-api/health`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: 'openApi健康检查'
+      }
+    },
+    async request => {
+      return { success: true, userInfo: request.openApiPayload, message: 'openApi服务正常' };
+    }
+  );
   fastify.post(
     `${options.prefix}/open-api/create`,
     {
@@ -14,7 +26,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.createConference(options.getUserInfo(request), request.body);
+      return services.createConference(request.openApiPayload, request.body);
     }
   );
 });
