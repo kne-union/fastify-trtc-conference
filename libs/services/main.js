@@ -16,7 +16,6 @@ module.exports = fp(async (fastify, options) => {
     return options.getParams(Object.assign({}, props));
   };
 
-  //SecretKey
   const getUserSig = (userId, props) => {
     const { appId, appSecret, expire } = getTrtcParams(props);
     const api = new TLSSigAPIv2.Api(appId, appSecret);
@@ -211,6 +210,15 @@ module.exports = fp(async (fastify, options) => {
     const member = id && (await getMember({ id }));
     const inviter = fromUser ? userInviter : inviterId && (await getMember({ id: inviterId }));
     return { conference, member, inviter };
+  };
+
+  const getConferenceDetailById = async (authenticatePayload, { id }) => {
+    const { id: userId } = authenticatePayload;
+    const conference = await getConference({ id });
+    if (conference.userId !== userId) {
+      throw new Error('Data has expired, please refresh the page and try again');
+    }
+    return conference;
   };
 
   const saveMember = async (authenticatePayload, data) => {
@@ -473,6 +481,7 @@ module.exports = fp(async (fastify, options) => {
     deleteConference,
     getConferenceList,
     getConferenceDetail,
+    getConferenceDetailById,
     enterConference,
     saveMember,
     inviteMember,
