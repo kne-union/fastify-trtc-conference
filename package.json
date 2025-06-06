@@ -1,6 +1,6 @@
 {
   "name": "@kne/fastify-trtc-conference",
-  "version": "1.0.13",
+  "version": "1.0.14",
   "description": "用于实现一个trtc的视频会议系统",
   "main": "index.js",
   "scripts": {

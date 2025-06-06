@@ -29,4 +29,24 @@ module.exports = fp(async (fastify, options) => {
       return services.createConference(request.openApiPayload, request.body);
     }
   );
+
+  fastify.get(
+    `${options.prefix}/open-api/detail`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: '获取会议信息',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getConferenceDetailById(request.openApiPayload, request.query);
+    }
+  );
 });
