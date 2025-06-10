@@ -491,6 +491,9 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('Only the master can end the conference');
     }
     const conference = await getConference({ id: conferenceId });
+
+    await stopAITranscription(authenticatePayload);
+
     conference.status = 1;
     await conference.save();
     const client = getTrtcClient();
