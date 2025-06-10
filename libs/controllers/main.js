@@ -115,6 +115,60 @@ module.exports = fp(async (fastify, options) => {
   );
 
   fastify.post(
+    `${options.prefix}/startAITranscription`,
+    {
+      onRequest: [authenticate.code],
+      schema: {
+        description: '开启AI转写',
+        summary: '开启AI转写'
+      }
+    },
+    async request => {
+      await services.startAITranscription(request.authenticatePayload);
+      return {};
+    }
+  );
+
+  fastify.post(
+    `${options.prefix}/stopAITranscription`,
+    {
+      onRequest: [authenticate.code],
+      schema: {
+        description: '停止AI转写',
+        summary: '停止AI转写'
+      }
+    },
+    async request => {
+      await services.stopAITranscription(request.authenticatePayload);
+      return {};
+    }
+  );
+
+  fastify.post(
+    `${options.prefix}/recordAITranscription`,
+    {
+      onRequest: [authenticate.code],
+      schema: {
+        description: '记录AI转写内容',
+        summary: '记录AI转写内容',
+        body: {
+          type: 'object',
+          properties: {
+            messages: {
+              type: 'array',
+              items: { type: 'object', properties: { message: { type: 'string' }, sender: { type: 'string' } } }
+            }
+          }
+        }
+      }
+    },
+    async request => {
+      await services.stopAITranscription(request.authenticatePayload, request.body);
+      return {};
+    }
+  );
+
+  fastify.post(
     `${options.prefix}/end`,
     {
       onRequest: [authenticate.code],
@@ -152,6 +206,25 @@ module.exports = fp(async (fastify, options) => {
     },
     async request => {
       return services.getConferenceList(request.authenticatePayload, request.query);
+    }
+  );
+
+  fastify.get(
+    `${options.prefix}/getAiTranscriptionContent`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        summary: '获取会议AI语音转写内容',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          }
+        }
+      }
+    },
+    async request => {
+      return services.getAiTranscriptionContentById(request.authenticatePayload, request.query);
     }
   );
 

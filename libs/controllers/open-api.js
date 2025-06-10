@@ -49,4 +49,24 @@ module.exports = fp(async (fastify, options) => {
       return services.getConferenceDetailById(request.openApiPayload, request.query);
     }
   );
+
+  fastify.get(
+    `${options.prefix}/open-api/aiTranscriptionContent`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: '获取会议AI语音转写内容',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getAiTranscriptionContentById(request.openApiPayload, request.query);
+    }
+  );
 });
