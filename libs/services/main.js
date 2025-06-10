@@ -221,6 +221,18 @@ module.exports = fp(async (fastify, options) => {
     return conference;
   };
 
+  const getAiTranscriptionContentById = async (authenticatePayload, { id }) => {
+    const conference = await getConferenceDetailById(authenticatePayload, { id });
+    if (!conference.options?.settings?.speech) {
+      return {};
+    }
+    return await models.aiTranscriptionContent.findOne({
+      where: {
+        conferenceId: conference.id
+      }
+    });
+  };
+
   const saveMember = async (authenticatePayload, data) => {
     const { id } = authenticatePayload;
     const member = await getMember({ id });
@@ -366,6 +378,86 @@ module.exports = fp(async (fastify, options) => {
     );
   };
 
+  const startAITranscription = async authenticatePayload => {
+    const { id, conferenceId, isMaster } = authenticatePayload;
+    if (!isMaster) {
+      throw new Error('Only the master can start the transcription');
+    }
+    const conference = await getConference({ id: conferenceId, status: 0 });
+    if (!conference.options?.setting?.speech) {
+      return;
+    }
+    await getMember({ id, conferenceId });
+    const client = getTrtcClient();
+    const robotUserSig = getUserSig(`robot_${conference.id}`, conference.options?.setting);
+
+    if (conference.options?.aiTranscription) {
+      const { Status } = await client.DescribeAIConversation({
+        SdkAppId: robotUserSig.sdkAppId,
+        TaskId: conference.options?.aiTranscription?.TaskId
+      });
+      if (Status !== 'Stopped') {
+        return;
+      }
+    }
+
+    const res = await client.StartAITranscription({
+      SdkAppId: robotUserSig.sdkAppId,
+      RoomId: conference.id,
+      RoomIdType: 1,
+      TranscriptionParams: {
+        UserId: robotUserSig.userId,
+        UserSig: robotUserSig.userSig
+      }
+    });
+
+    conference.options = Object.assign({}, conference.options, {
+      aiTranscription: res
+    });
+
+    await conference.save();
+  };
+
+  const recordAITranscription = async (authenticatePayload, { messages }) => {
+    const { id, conferenceId } = authenticatePayload;
+    if (messages.length === 0) {
+      return;
+    }
+    const conference = await getConference({ id: conferenceId, status: 0 });
+    if (!conference.options?.setting?.speech) {
+      return;
+    }
+    await getMember({ id, conferenceId });
+
+    const aiTranscriptionContent = await models.aiTranscriptionContent.findOrCreate({
+      conferenceId: conference.id
+    });
+    const newContent = (aiTranscriptionContent.content || []).slice(0);
+    newContent.push(...messages);
+
+    aiTranscriptionContent.content = newContent;
+
+    await aiTranscriptionContent.save();
+  };
+
+  const stopAITranscription = async authenticatePayload => {
+    const { id, conferenceId, isMaster } = authenticatePayload;
+    if (!isMaster) {
+      throw new Error('Only the master can stop the transcription');
+    }
+    const conference = await getConference({ id: conferenceId, status: 0 });
+    if (!conference.options?.setting?.speech) {
+      return;
+    }
+    await getMember({ id, conferenceId });
+    const client = getTrtcClient();
+    if (conference.options?.aiTranscription) {
+      await client.StopAITranscription({
+        TaskId: conference.options?.aiTranscription.TaskId
+      });
+    }
+  };
+
   const removeMember = async (authenticatePayload, { id }) => {
     const { isMaster, conferenceId } = authenticatePayload;
     if (!isMaster) {
@@ -440,6 +532,7 @@ module.exports = fp(async (fastify, options) => {
           if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
             conference.status = 1;
             await conference.save();
+            await stopAITranscription({ id: memberId, conferenceId: conference.id, isMaster: true });
           }
 
           if (conference.status === 0) {
@@ -482,6 +575,7 @@ module.exports = fp(async (fastify, options) => {
     getConferenceList,
     getConferenceDetail,
     getConferenceDetailById,
+    getAiTranscriptionContentById,
     enterConference,
     saveMember,
     inviteMember,
@@ -490,6 +584,9 @@ module.exports = fp(async (fastify, options) => {
     getConference,
     joinConference,
     removeMember,
-    endConference
+    endConference,
+    startAITranscription,
+    stopAITranscription,
+    recordAITranscription
   });
 });
