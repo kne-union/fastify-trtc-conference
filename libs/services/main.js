@@ -445,7 +445,7 @@ module.exports = fp(async (fastify, options) => {
     if (!isMaster) {
       throw new Error('Only the master can stop the transcription');
     }
-    const conference = await getConference({ id: conferenceId, status: 0 });
+    const conference = await getConference({ id: conferenceId });
     if (!conference.options?.setting?.speech) {
       return;
     }
