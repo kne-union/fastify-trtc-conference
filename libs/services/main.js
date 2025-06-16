@@ -451,11 +451,13 @@ module.exports = fp(async (fastify, options) => {
     }
     await getMember({ id, conferenceId });
     const client = getTrtcClient();
-    if (conference.options?.aiTranscription) {
-      await client.StopAITranscription({
-        TaskId: conference.options?.aiTranscription.TaskId
-      });
-    }
+    try {
+      if (conference.options?.aiTranscription) {
+        await client.StopAITranscription({
+          TaskId: conference.options?.aiTranscription.TaskId
+        });
+      }
+    } catch (e) {}
   };
 
   const removeMember = async (authenticatePayload, { id }) => {
@@ -533,9 +535,9 @@ module.exports = fp(async (fastify, options) => {
           const memberId = decode(UserId);
           const conference = await getConference({ id: conferenceId });
           if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
-            await stopAITranscription({ id: memberId, conferenceId: conference.id, isMaster: true });
             conference.status = 1;
             await conference.save();
+            await stopAITranscription({ id: memberId, conferenceId: conference.id, isMaster: true });
           }
 
           if (conference.status === 0) {
