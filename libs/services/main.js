@@ -21,9 +21,7 @@ module.exports = fp(async (fastify, options) => {
     const api = new TLSSigAPIv2.Api(appId, appSecret);
     const userSig = api.genUserSig(userId, expire || 60 * 10);
     return {
-      sdkAppId: appId,
-      userId,
-      userSig
+      sdkAppId: appId, userId, userSig
     };
   };
 
@@ -50,7 +48,17 @@ module.exports = fp(async (fastify, options) => {
     return cosClient;
   };
 
-  const createConference = async (authenticatePayload, { includingMe, name, startTime, duration, isInvitationAllowed, origin, maxCount, options: conferenceOptions, members = [] }) => {
+  const createConference = async (authenticatePayload, {
+    includingMe,
+    name,
+    startTime,
+    duration,
+    isInvitationAllowed,
+    origin,
+    maxCount,
+    options: conferenceOptions,
+    members = []
+  }) => {
     const { id, nickname, email, avatar } = authenticatePayload;
     if (!includingMe && !(members && members.find(item => item.isMaster))) {
       throw new Error('At least one master is needed');
@@ -60,52 +68,34 @@ module.exports = fp(async (fastify, options) => {
     }
 
     const conference = await models.conference.create({
-      name,
-      startTime,
-      duration,
-      isInvitationAllowed,
-      origin,
-      maxCount,
-      options: conferenceOptions,
-      userId: id
+      name, startTime, duration, isInvitationAllowed, origin, maxCount, options: conferenceOptions, userId: id
     });
 
-    const currentMembers = members.map(item =>
-      Object.assign({}, item, {
-        conferenceId: conference.id
-      })
-    );
+    const currentMembers = members.map(item => Object.assign({}, item, {
+      conferenceId: conference.id
+    }));
     if (includingMe) {
       currentMembers.push({
-        avatar,
-        email,
-        nickname,
-        conferenceId: conference.id,
-        isMaster: true
+        avatar, email, nickname, conferenceId: conference.id, isMaster: true
       });
     }
 
     const memberList = await models.member.bulkCreate(currentMembers);
 
     return Object.assign({}, conference.toJSON(), {
-      members: await Promise.all(
-        memberList.map(async member => {
-          member.shorten = await fastify[options.shortenName].services.sign(
-            JSON.stringify({
-              id: member.id,
-              conferenceId: member.conferenceId,
-              isMaster: member.isMaster
-            }),
-            dayjs().add(1, 'month').toDate()
-          );
-          await member.save();
-          return Object.assign({}, member.toJSON());
-        })
-      )
+      members: await Promise.all(memberList.map(async member => {
+        member.shorten = await fastify[options.shortenName].services.sign(JSON.stringify({
+          id: member.id, conferenceId: member.conferenceId, isMaster: member.isMaster
+        }), dayjs().add(1, 'month').toDate());
+        await member.save();
+        return Object.assign({}, member.toJSON());
+      }))
     });
   };
 
-  const saveConference = async (authenticatePayload, { id, name, duration, isInvitationAllowed, maxCount, options: conferenceOptions }) => {
+  const saveConference = async (authenticatePayload, {
+    id, name, duration, isInvitationAllowed, maxCount, options: conferenceOptions
+  }) => {
     const { id: userId } = authenticatePayload;
     const conference = await getConference({ id });
     if (conference.userId !== userId) {
@@ -147,11 +137,7 @@ module.exports = fp(async (fastify, options) => {
     const rows = await models.conference.findAll({
       where: {
         userId: id
-      },
-      include: models.member,
-      offset: perPage * (currentPage - 1),
-      limit: perPage,
-      order: [['startTime', 'DESC']]
+      }, include: models.member, offset: perPage * (currentPage - 1), limit: perPage, order: [['startTime', 'DESC']]
     });
 
     for (let conference of rows) {
@@ -249,17 +235,11 @@ module.exports = fp(async (fastify, options) => {
     }
     const conference = await getConference({ id: conferenceId, status: 0 });
     const member = await getMember({ id });
-    const shorten = await fastify[options.shortenName].services.sign(
-      JSON.stringify({
-        conferenceId,
-        inviterId: id
-      }),
-      dayjs().add(1, 'month').toDate()
-    );
+    const shorten = await fastify[options.shortenName].services.sign(JSON.stringify({
+      conferenceId, inviterId: id
+    }), dayjs().add(1, 'month').toDate());
     return {
-      shorten,
-      inviter: member,
-      conference
+      shorten, inviter: member, conference
     };
   };
 
@@ -268,24 +248,15 @@ module.exports = fp(async (fastify, options) => {
     if (conference.userId !== authenticatePayload.id) {
       throw new Error('Only the conference creator can perform this operation');
     }
-    const shorten = await fastify[options.shortenName].services.sign(
-      JSON.stringify({
-        conferenceId: id,
-        fromUser: true,
-        inviter: {
-          fromUser: true,
-          nickname: authenticatePayload.nickname || authenticatePayload.email
-        }
-      }),
-      dayjs().add(1, 'month').toDate()
-    );
+    const shorten = await fastify[options.shortenName].services.sign(JSON.stringify({
+      conferenceId: id, fromUser: true, inviter: {
+        fromUser: true, nickname: authenticatePayload.nickname || authenticatePayload.email
+      }
+    }), dayjs().add(1, 'month').toDate());
     return {
-      shorten,
-      inviter: {
-        fromUser: true,
-        nickname: authenticatePayload.nickname || authenticatePayload.email
-      },
-      conference
+      shorten, inviter: {
+        fromUser: true, nickname: authenticatePayload.nickname || authenticatePayload.email
+      }, conference
     };
   };
 
@@ -297,14 +268,9 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('Only the conference creator can perform this operation');
     }
 
-    const shorten = await fastify[options.shortenName].services.sign(
-      JSON.stringify({
-        id: member.id,
-        conferenceId: member.conferenceId,
-        isMaster: member.isMaster
-      }),
-      dayjs().add(1, 'month').toDate()
-    );
+    const shorten = await fastify[options.shortenName].services.sign(JSON.stringify({
+      id: member.id, conferenceId: member.conferenceId, isMaster: member.isMaster
+    }), dayjs().add(1, 'month').toDate());
 
     member.shorten = shorten;
     await member.save();
@@ -335,19 +301,12 @@ module.exports = fp(async (fastify, options) => {
     }
 
     const newMember = await models.member.create({
-      ...data,
-      conferenceId,
-      isMaster: false
+      ...data, conferenceId, isMaster: false
     });
 
-    const shorten = await fastify[options.shortenName].services.sign(
-      JSON.stringify({
-        id: newMember.id,
-        conferenceId: newMember.conferenceId,
-        isMaster: false
-      }),
-      dayjs().add(1, 'month').toDate()
-    );
+    const shorten = await fastify[options.shortenName].services.sign(JSON.stringify({
+      id: newMember.id, conferenceId: newMember.conferenceId, isMaster: false
+    }), dayjs().add(1, 'month').toDate());
 
     newMember.shorten = shorten;
     await newMember.save();
@@ -368,14 +327,9 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('The conference has ended');
     }
 
-    return Object.assign(
-      {},
-      {
-        member,
-        conference,
-        sign: getUserSig(id, conference.options?.setting)
-      }
-    );
+    return Object.assign({}, {
+      member, conference, sign: getUserSig(id, conference.options?.setting)
+    });
   };
 
   const startAITranscription = async authenticatePayload => {
@@ -393,8 +347,7 @@ module.exports = fp(async (fastify, options) => {
 
     if (conference.options?.aiTranscription) {
       const { Status } = await client.DescribeAIConversation({
-        SdkAppId: robotUserSig.sdkAppId,
-        TaskId: conference.options?.aiTranscription?.TaskId
+        SdkAppId: robotUserSig.sdkAppId, TaskId: conference.options?.aiTranscription?.TaskId
       });
       if (Status !== 'Stopped') {
         return;
@@ -402,12 +355,8 @@ module.exports = fp(async (fastify, options) => {
     }
 
     const res = await client.StartAITranscription({
-      SdkAppId: robotUserSig.sdkAppId,
-      RoomId: conference.id,
-      RoomIdType: 1,
-      TranscriptionParams: {
-        UserId: robotUserSig.userId,
-        UserSig: robotUserSig.userSig
+      SdkAppId: robotUserSig.sdkAppId, RoomId: conference.id, RoomIdType: 1, TranscriptionParams: {
+        UserId: robotUserSig.userId, UserSig: robotUserSig.userSig
       }
     });
 
@@ -418,9 +367,9 @@ module.exports = fp(async (fastify, options) => {
     await conference.save();
   };
 
-  const recordAITranscription = async (authenticatePayload, { messages }) => {
+  const recordAITranscription = async (authenticatePayload, { records }) => {
     const { id, conferenceId } = authenticatePayload;
-    if (messages.length === 0) {
+    if (records.length === 0) {
       return;
     }
     const conference = await getConference({ id: conferenceId, status: 0 });
@@ -429,13 +378,25 @@ module.exports = fp(async (fastify, options) => {
     }
     await getMember({ id, conferenceId });
 
-    const aiTranscriptionContent = await models.aiTranscriptionContent.findOrCreate({
-      conferenceId: conference.id
+    let aiTranscriptionContent = await models.aiTranscriptionContent.findOne({
+      where: {
+        conferenceId: conference.id
+      }
     });
+    if (!aiTranscriptionContent) {
+      aiTranscriptionContent = await models.aiTranscriptionContent.create({
+        conferenceId: conference.id, content: []
+      });
+    }
+
+
     const newContent = (aiTranscriptionContent.content || []).slice(0);
-    newContent.push(...messages);
+    newContent.push(...records);
 
     aiTranscriptionContent.content = newContent;
+
+
+    console.log('>>>>>>', aiTranscriptionContent);
 
     await aiTranscriptionContent.save();
   };
@@ -457,7 +418,8 @@ module.exports = fp(async (fastify, options) => {
           TaskId: conference.options?.aiTranscription.TaskId
         });
       }
-    } catch (e) {}
+    } catch (e) {
+    }
   };
 
   const removeMember = async (authenticatePayload, { id }) => {
@@ -478,9 +440,7 @@ module.exports = fp(async (fastify, options) => {
     const client = getTrtcClient();
     const { appId } = getTrtcParams(conference.options?.setting);
     await client.RemoveUserByStrRoomId({
-      SdkAppId: appId,
-      RoomId: conference.id,
-      UserIds: [member.id]
+      SdkAppId: appId, RoomId: conference.id, UserIds: [member.id]
     });
   };
 
@@ -502,8 +462,7 @@ module.exports = fp(async (fastify, options) => {
     // 调用TRTC服务端API结束会议
     const { appId } = getTrtcParams(conference.options?.setting);
     await client.DismissRoomByStrRoomId({
-      SdkAppId: appId,
-      RoomId: conferenceId
+      SdkAppId: appId, RoomId: conferenceId
     });
   };
 
@@ -511,61 +470,56 @@ module.exports = fp(async (fastify, options) => {
     const cosClient = getCosClient();
     try {
       const { Contents } = await cosClient.getBucket({
-        Bucket: get(options, 'tencentcloud.cos.bucket'),
-        Region: get(options, 'tencentcloud.cos.region')
+        Bucket: get(options, 'tencentcloud.cos.bucket'), Region: get(options, 'tencentcloud.cos.region')
       });
-      await Promise.all(
-        Contents.map(async item => {
-          const url = cosClient.getObjectUrl({
-            Bucket: get(options, 'tencentcloud.cos.bucket'),
-            Region: get(options, 'tencentcloud.cos.region'),
-            Key: item.Key,
-            Sign: true
-          });
-          const filename = path.basename(url).split('?')[0];
-          const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
-          const [_, SdkAppId, RoomId, UserId, MediaId] = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
+      await Promise.all(Contents.map(async item => {
+        const url = cosClient.getObjectUrl({
+          Bucket: get(options, 'tencentcloud.cos.bucket'),
+          Region: get(options, 'tencentcloud.cos.region'),
+          Key: item.Key,
+          Sign: true
+        });
+        const filename = path.basename(url).split('?')[0];
+        const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
+        const [_, SdkAppId, RoomId, UserId, MediaId] = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
 
-          const decode = input => {
-            const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
-            return Buffer.from(replaced, 'base64').toString('utf8');
-          };
-          const { id: fileId } = await fastify.fileManager.services.uploadFromUrl({ url });
-          const conferenceId = decode(RoomId);
-          const memberId = decode(UserId);
-          const conference = await getConference({ id: conferenceId });
-          if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
-            conference.status = 1;
-            await conference.save();
-            await stopAITranscription({ id: memberId, conferenceId: conference.id, isMaster: true });
-          }
-
-          if (conference.status === 0) {
-            return;
-          }
-
-          const target = {
-            fileId,
-            filename
-          };
-          const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
-          list.push(target);
-          conference.options = Object.assign({}, conference.options, {
-            recordFilesAchieved: true,
-            recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
-              [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
-                [`${MediaId}`]: uniqBy(list, 'fileId')
-              })
-            })
-          });
+        const decode = input => {
+          const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
+          return Buffer.from(replaced, 'base64').toString('utf8');
+        };
+        const { id: fileId } = await fastify.fileManager.services.uploadFromUrl({ url });
+        const conferenceId = decode(RoomId);
+        const memberId = decode(UserId);
+        const conference = await getConference({ id: conferenceId });
+        if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
+          conference.status = 1;
           await conference.save();
-          await cosClient.deleteObject({
-            Bucket: get(options, 'tencentcloud.cos.bucket'),
-            Region: get(options, 'tencentcloud.cos.region'),
-            Key: item.Key
-          });
-        })
-      );
+          await stopAITranscription({ id: memberId, conferenceId: conference.id, isMaster: true });
+        }
+
+        if (conference.status === 0) {
+          return;
+        }
+
+        const target = {
+          fileId, filename
+        };
+        const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
+        list.push(target);
+        conference.options = Object.assign({}, conference.options, {
+          recordFilesAchieved: true, recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
+            [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
+              [`${MediaId}`]: uniqBy(list, 'fileId')
+            })
+          })
+        });
+        await conference.save();
+        await cosClient.deleteObject({
+          Bucket: get(options, 'tencentcloud.cos.bucket'),
+          Region: get(options, 'tencentcloud.cos.region'),
+          Key: item.Key
+        });
+      }));
     } catch (e) {
       console.error(e);
     }
