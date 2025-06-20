@@ -156,14 +156,14 @@ module.exports = fp(async (fastify, options) => {
           properties: {
             messages: {
               type: 'array',
-              items: { type: 'object', properties: { message: { type: 'string' }, sender: { type: 'string' } } }
+              items: { type: 'object', properties: { records: { type: 'array' } } }
             }
           }
         }
       }
     },
     async request => {
-      await services.stopAITranscription(request.authenticatePayload, request.body);
+      await services.recordAITranscription(request.authenticatePayload, request.body);
       return {};
     }
   );
