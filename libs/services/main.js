@@ -412,6 +412,10 @@ module.exports = fp(async (fastify, options) => {
       TranscriptionParams: {
         UserId: robotUserSig.userId,
         UserSig: robotUserSig.userSig
+      },
+      RecognizeConfig: {
+        Language: conference.options?.setting?.language || options?.language,
+        HotWordList: conference.options?.setting?.hotWordList || options?.hotWordList
       }
     });
 
@@ -449,8 +453,6 @@ module.exports = fp(async (fastify, options) => {
     newContent.push(...records);
 
     aiTranscriptionContent.content = newContent;
-
-    console.log('>>>>>>', aiTranscriptionContent);
 
     await aiTranscriptionContent.save();
   };
