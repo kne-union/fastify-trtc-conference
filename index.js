@@ -61,7 +61,7 @@ module.exports = fp(async (fastify, options) => {
     ]
   });
 
-  fastify.register(
+  /*fastify.register(
     require('fastify-plugin')(async fastify => {
       options.syncCron &&
         fastify.register(require('fastify-cron'), {
@@ -78,5 +78,5 @@ module.exports = fp(async (fastify, options) => {
           ]
         });
     })
-  );
+  );*/
 });
