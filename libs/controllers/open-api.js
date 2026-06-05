@@ -50,6 +50,27 @@ module.exports = fp(async (fastify, options) => {
     }
   );
 
+  fastify.post(
+    `${options.prefix}/open-api/cancel`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: 'openApi取消会议',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      await services.cancelConferenceById(request.openApiPayload, request.body);
+      return {};
+    }
+  );
+
   fastify.get(
     `${options.prefix}/open-api/aiTranscriptionContent`,
     {

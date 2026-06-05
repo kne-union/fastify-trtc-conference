@@ -189,6 +189,27 @@ module.exports = fp(async (fastify, options) => {
     }
   );
 
+  fastify.post(
+    `${options.prefix}/cancel`,
+    {
+      onRequest: [authenticate.code],
+      schema: {
+        description: '取消会议',
+        summary: '取消会议',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          }
+        }
+      }
+    },
+    async request => {
+      await services.cancelConference(request.authenticatePayload, request.body);
+      return {};
+    }
+  );
+
   fastify.get(
     `${options.prefix}/list`,
     {

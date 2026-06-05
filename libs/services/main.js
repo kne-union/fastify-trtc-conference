@@ -155,7 +155,7 @@ module.exports = fp(async (fastify, options) => {
     });
 
     for (let conference of rows) {
-      if (conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
+      if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
         conference.status = 1;
         await conference.save();
       }
@@ -182,6 +182,10 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('Conference has ended');
     }
 
+    if (status === 0 && conference.status === 2) {
+      throw new Error('Conference has been canceled');
+    }
+
     return conference;
   };
 
@@ -202,7 +206,7 @@ module.exports = fp(async (fastify, options) => {
   const getConferenceDetail = async authenticatePayload => {
     const { id, conferenceId, fromUser, inviterId, inviter: userInviter } = authenticatePayload;
     const conference = await getConference({ id: conferenceId });
-    if (conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
+    if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
       conference.status = 1;
       await conference.save();
     }
@@ -522,74 +526,128 @@ module.exports = fp(async (fastify, options) => {
       SdkAppId: appId,
       RoomId: conferenceId
     });
-  };
-
-  const syncRecordFiles = async () => {
-    const cosClient = getCosClient();
-    try {
-      const { Contents } = await cosClient.getBucket({
-        Bucket: get(options, 'tencentcloud.cos.bucket'),
-        Region: get(options, 'tencentcloud.cos.region')
+    //会议结束后如果开启了会议录像，添加一个获取录像的task
+    if (conference.options?.setting?.record) {
+      await fastify.task.services.create({
+        userId: conference.userId,
+        type: 'record-video',
+        targetId: conference.id,
+        targetType: 'conference',
+        runnerType: 'system',
+        input: {
+          conferenceId: conference.id,
+          sdkAppId: appId,
+          roomId: conferenceId
+        },
+        delay: 300
       });
-      await Promise.all(
-        Contents.map(async item => {
-          const url = cosClient.getObjectUrl({
-            Bucket: get(options, 'tencentcloud.cos.bucket'),
-            Region: get(options, 'tencentcloud.cos.region'),
-            Key: item.Key,
-            Sign: true
-          });
-          const filename = path.basename(url).split('?')[0];
-          const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
-          const [_, SdkAppId, RoomId, UserId, MediaId] = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
-
-          const decode = input => {
-            const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
-            return Buffer.from(replaced, 'base64').toString('utf8');
-          };
-          const { id: fileId } = await fastify.fileManager.services.uploadFromUrl({ url });
-          const conferenceId = decode(RoomId);
-          const memberId = decode(UserId);
-          const conference = await getConference({ id: conferenceId });
-          if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
-            conference.status = 1;
-            await conference.save();
-            await stopAITranscription({ id: memberId, conferenceId: conference.id, isMaster: true });
-          }
-
-          if (conference.status === 0) {
-            return;
-          }
-
-          const target = {
-            fileId,
-            filename
-          };
-          const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
-          list.push(target);
-          conference.options = Object.assign({}, conference.options, {
-            recordFilesAchieved: true,
-            recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
-              [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
-                [`${MediaId}`]: uniqBy(list, 'fileId')
-              })
-            })
-          });
-          await conference.save();
-          await cosClient.deleteObject({
-            Bucket: get(options, 'tencentcloud.cos.bucket'),
-            Region: get(options, 'tencentcloud.cos.region'),
-            Key: item.Key
-          });
-        })
-      );
-    } catch (e) {
-      console.error(e);
     }
   };
 
+  const getConferenceRecordVideo = async ({ conferenceId, sdkAppId, roomId }) => {
+    const conference = await models.conference.findByPk(conferenceId);
+    if (!conference) {
+      throw new Error('Conference does not exist');
+    }
+
+    const cos = getCosClient();
+    const bucket = get(options, 'tencentcloud.cos.bucket');
+    const region = get(options, 'tencentcloud.cos.region');
+
+    const decode = input => {
+      const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
+      return Buffer.from(replaced, 'base64').toString('utf8');
+    };
+
+    // 列出COS桶中指定前缀的录制文件
+    const { Contents } = await cos.getBucket({
+      Bucket: bucket,
+      Region: region,
+      Prefix: `${sdkAppId}/`
+    });
+
+    if (!Contents || Contents.length === 0) {
+      return;
+    }
+
+    const results = [];
+
+    for (const item of Contents) {
+      const filename = path.basename(item.Key).split('?')[0];
+      const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
+
+      // 解析TRTC录制文件名格式: SdkAppId_RoomId_UserId_s_UserId_UserId_e_MediaId
+      const match = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
+      if (!match) {
+        continue;
+      }
+
+      const [, , RoomId, UserId, MediaId] = match;
+      const decodedRoomId = decode(RoomId);
+
+      // 只处理当前会议房间的录制文件
+      if (decodedRoomId !== roomId) {
+        continue;
+      }
+
+      // 获取带签名的文件URL用于下载
+      const url = cos.getObjectUrl({
+        Bucket: bucket,
+        Region: region,
+        Key: item.Key,
+        Sign: true
+      });
+
+      // 上传到文件管理器
+      const { id: fileId } = await fastify.fileManager.services.uploadFromUrl({ url });
+
+      results.push(fileId);
+
+      const memberId = decode(UserId);
+      const target = { fileId, filename };
+      const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
+      list.push(target);
+
+      conference.options = Object.assign({}, conference.options, {
+        recordFilesAchieved: true,
+        recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
+          [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
+            [MediaId]: uniqBy(list, 'fileId')
+          })
+        })
+      });
+    }
+
+    await conference.save();
+
+    return results;
+  };
+
+  const cancelConference = async (authenticatePayload, { id }) => {
+    const { conferenceId, isMaster } = authenticatePayload;
+    if (conferenceId !== id) {
+      throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
+    }
+    if (!isMaster) {
+      throw new Error('Only the master can cancel the conference');
+    }
+    const conference = await getConference({ id: conferenceId, status: 0 });
+    await stopAITranscription(authenticatePayload);
+    conference.status = 2;
+    await conference.save();
+  };
+
+  const cancelConferenceById = async (authenticatePayload, { id }) => {
+    const { id: userId } = authenticatePayload;
+    const conference = await getConference({ id, status: 0 });
+    if (conference.userId !== userId) {
+      throw new Error('Only the conference creator can perform this operation');
+    }
+    conference.status = 2;
+    await conference.save();
+  };
+
   Object.assign(fastify[options.name].services, {
-    syncRecordFiles,
     getUserSig,
     createConference,
     saveConference,
@@ -607,8 +665,11 @@ module.exports = fp(async (fastify, options) => {
     joinConference,
     removeMember,
     endConference,
+    cancelConference,
+    cancelConferenceById,
     startAITranscription,
     stopAITranscription,
-    recordAITranscription
+    recordAITranscription,
+    getConferenceRecordVideo
   });
 });

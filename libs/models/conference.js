@@ -30,7 +30,7 @@ module.exports = ({ DataTypes, options }) => {
       status: {
         type: DataTypes.INTEGER,
         defaultValue: 0,
-        comment: '会议状态: 0正常，1:已结束'
+        comment: '会议状态: 0正常，1:已结束，2:已取消'
       },
       options: {
         type: DataTypes.JSON,
