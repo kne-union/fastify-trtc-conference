@@ -51,15 +51,17 @@ module.exports = fp(
           appId: options.appId,
           appSecret: options.appSecret,
           expire: options.expire,
-          getParams: options.getParams,
-          cos: {
+          getParams: options.getParams
+        },
+        options.tencentcloud,
+        {
+          cos: Object.assign({}, get(options, 'tencentcloud.cos'), {
             region: get(options, 'tencentcloud.cos.region'),
             bucket: get(options, 'tencentcloud.cos.bucket'),
             accessKeyId: get(options, 'tencentcloud.credential.secretId'),
             accessKeySecret: get(options, 'tencentcloud.credential.secretKey')
-          }
-        },
-        options.tencentcloud
+          })
+        }
       )
     );
 
