@@ -31,6 +31,7 @@ module.exports = fp(async (fastify, options) => {
           type: 'object',
           properties: {
             avatar: { type: 'string' },
+            nickname: { type: 'string' },
             name: { type: 'string' },
             email: { type: 'string' }
           }
@@ -68,6 +69,7 @@ module.exports = fp(async (fastify, options) => {
           type: 'object',
           properties: {
             avatar: { type: 'string' },
+            nickname: { type: 'string' },
             name: { type: 'string' },
             email: { type: 'string' }
           }
@@ -341,7 +343,7 @@ module.exports = fp(async (fastify, options) => {
   );
 
   fastify.post(
-    `${options.prefix}/inviteMemberFormUser`,
+    `${options.prefix}/inviteMemberFromUser`,
     {
       onRequest: [userAuthenticate],
       schema: {
@@ -357,7 +359,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.inviteMemberFormUser(options.getUserInfo(request), request.body);
+      return services.inviteMemberFromUser(options.getUserInfo(request), request.body);
     }
   );
 });

@@ -66,7 +66,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      await services.cancelConferenceById(request.openApiPayload, request.body);
+      await services.cancelConference(request.openApiPayload, request.body);
       return {};
     }
   );

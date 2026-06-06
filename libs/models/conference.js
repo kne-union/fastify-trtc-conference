@@ -11,7 +11,7 @@ module.exports = ({ DataTypes, options }) => {
       },
       duration: {
         type: DataTypes.INTEGER,
-        comment: '会议时长'
+        comment: '会议时长，单位:秒'
       },
       isInvitationAllowed: {
         type: DataTypes.BOOLEAN,
