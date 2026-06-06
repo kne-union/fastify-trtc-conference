@@ -1,53 +1,72 @@
 const fp = require('fastify-plugin');
-const TLSSigAPIv2 = require('tls-sig-api-v2');
 const dayjs = require('dayjs');
 const duration = require('dayjs/plugin/duration');
-const tencentcloud = require('tencentcloud-sdk-nodejs-trtc');
-const get = require('lodash/get');
-const uniqBy = require('lodash/uniqBy');
 dayjs.extend(duration);
-const TrtcClient = tencentcloud.trtc.v20190722.Client;
-const COS = require('cos-nodejs-sdk-v5');
-const path = require('path');
 
 module.exports = fp(async (fastify, options) => {
   const { models } = fastify[options.name];
-  const getTrtcParams = props => {
-    return options.getParams(Object.assign({}, props));
+  const trtc = fastify[options.trtcName].services;
+
+  const isConferenceExpired = conference => {
+    return conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'second')));
   };
 
-  const getUserSig = (userId, props) => {
-    const { appId, appSecret, expire } = getTrtcParams(props);
-    const api = new TLSSigAPIv2.Api(appId, appSecret);
-    const userSig = api.genUserSig(userId, expire || 60 * 10);
-    return {
-      sdkAppId: appId,
-      userId,
-      userSig
-    };
-  };
-
-  let trtcClient;
-
-  const getTrtcClient = () => {
-    if (trtcClient) {
-      return trtcClient;
+  const stopConferenceAITranscription = async conference => {
+    if (!conference.options?.setting?.speech) {
+      return;
     }
-    trtcClient = new TrtcClient(options.tencentcloud);
-    return trtcClient;
+    try {
+      if (conference.options?.aiTranscription?.id) {
+        await trtc.stopAITranscription({
+          id: conference.options.aiTranscription.id,
+          roomId: conference.id,
+          options: conference.options?.setting
+        });
+      }
+    } catch (e) {
+      console.error('Failed to stop AI transcription:', e);
+    }
   };
 
-  let cosClient;
-
-  const getCosClient = () => {
-    if (cosClient) {
-      return cosClient;
-    }
-    cosClient = new COS({
-      SecretId: get(options, 'tencentcloud.credential.secretId'),
-      SecretKey: get(options, 'tencentcloud.credential.secretKey')
+  const finishConference = async conference => {
+    // 调用TRTC服务端API结束会议
+    await trtc.dismiss({
+      roomId: conference.id,
+      options: conference.options?.setting
     });
-    return cosClient;
+    // 会议结束后如果开启了会议录像，添加一个获取录像的task
+    if (conference.options?.setting?.record && conference.options?.recordTaskId) {
+      // 停止录像任务
+      try {
+        await trtc.stopRecord({
+          id: conference.options.recordTaskId,
+          roomId: conference.id,
+          options: conference.options?.setting
+        });
+      } catch (e) {
+        console.error('Failed to stop record:', e);
+      }
+      await fastify.task.services.create({
+        userId: conference.userId,
+        type: 'record-video',
+        targetId: conference.id,
+        targetType: 'conference',
+        runnerType: 'system',
+        input: {
+          conferenceId: conference.id,
+          roomId: conference.id,
+          recordTaskId: conference.options.recordTaskId
+        },
+        delay: 300
+      });
+    }
+    conference.status = 1;
+    await conference.save();
+  };
+
+  const forceEndConference = async conference => {
+    await stopConferenceAITranscription(conference);
+    await finishConference(conference);
   };
 
   const createConference = async (authenticatePayload, { includingMe, name, startTime, duration, isInvitationAllowed, origin, maxCount, options: conferenceOptions, members = [] }) => {
@@ -72,6 +91,7 @@ module.exports = fp(async (fastify, options) => {
 
     const currentMembers = members.map(item =>
       Object.assign({}, item, {
+        nickname: item.nickname || item.name,
         conferenceId: conference.id
       })
     );
@@ -121,7 +141,7 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('MaxCount cannot be less than before');
     }
     conference.maxCount = maxCount;
-    conference.options = conferenceOptions;
+    conference.options = Object.assign({}, conference.options, conferenceOptions);
     await conference.save();
 
     return Object.assign({}, conference.toJSON());
@@ -154,10 +174,11 @@ module.exports = fp(async (fastify, options) => {
       order: [['startTime', 'DESC']]
     });
 
-    for (let conference of rows) {
-      if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
-        conference.status = 1;
-        await conference.save();
+    for (const conference of rows.filter(conference => isConferenceExpired(conference))) {
+      try {
+        await forceEndConference(conference);
+      } catch (error) {
+        console.error('Failed to force end expired conference:', error);
       }
     }
 
@@ -206,9 +227,8 @@ module.exports = fp(async (fastify, options) => {
   const getConferenceDetail = async authenticatePayload => {
     const { id, conferenceId, fromUser, inviterId, inviter: userInviter } = authenticatePayload;
     const conference = await getConference({ id: conferenceId });
-    if (conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
-      conference.status = 1;
-      await conference.save();
+    if (isConferenceExpired(conference)) {
+      await forceEndConference(conference);
     }
 
     const member = id && (await getMember({ id }));
@@ -227,7 +247,7 @@ module.exports = fp(async (fastify, options) => {
 
   const getAiTranscriptionContentById = async (authenticatePayload, { id }) => {
     const conference = await getConferenceDetailById(authenticatePayload, { id });
-    if (!conference.options?.settings?.speech) {
+    if (!conference.options?.setting?.speech) {
       return {};
     }
     return await models.aiTranscriptionContent.findOne({
@@ -240,6 +260,9 @@ module.exports = fp(async (fastify, options) => {
   const saveMember = async (authenticatePayload, data) => {
     const { id } = authenticatePayload;
     const member = await getMember({ id });
+    if (Object.hasOwn(data, 'name') && !Object.hasOwn(data, 'nickname')) {
+      data.nickname = data.name;
+    }
     ['email', 'nickname', 'avatar'].forEach(name => {
       Object.hasOwn(data, name) && (member[name] = data[name]);
     });
@@ -267,7 +290,7 @@ module.exports = fp(async (fastify, options) => {
     };
   };
 
-  const inviteMemberFormUser = async (authenticatePayload, { id }) => {
+  const inviteMemberFromUser = async (authenticatePayload, { id }) => {
     const conference = await getConference({ id, status: 0 });
     if (conference.userId !== authenticatePayload.id) {
       throw new Error('Only the conference creator can perform this operation');
@@ -328,18 +351,18 @@ module.exports = fp(async (fastify, options) => {
 
     //检查会议是不是已经开始
     const conference = await getConference({ id: conferenceId, status: 0 });
-    /*if (confidence.startTime && dayjs().isBefore(dayjs(confidence.startTime))) {
-      throw new Error('The confidence has not yet started');
-    }*/
-    if (conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
+    if (isConferenceExpired(conference)) {
       throw new Error('The conference has ended');
     }
+
     if (conference.maxCount && conference.members.length >= conference.maxCount) {
       throw new Error('The conference is full');
     }
 
     const newMember = await models.member.create({
-      ...data,
+      email: data.email,
+      nickname: data.nickname || data.name,
+      avatar: data.avatar,
       conferenceId,
       isMaster: false
     });
@@ -365,11 +388,32 @@ module.exports = fp(async (fastify, options) => {
     const member = await getMember({ id, conferenceId });
 
     if (conference.startTime && dayjs().isBefore(dayjs(conference.startTime))) {
-      throw new Error('The confidence has not yet started');
+      throw new Error('The conference has not yet started');
     }
 
-    if (conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'minute')))) {
+    if (isConferenceExpired(conference)) {
       throw new Error('The conference has ended');
+    }
+
+    // 注册到TRTC房间并获取用户签名
+    const joinResult = await trtc.join({
+      roomId: conference.id,
+      userId: id,
+      options: conference.options?.setting
+    });
+    const sign = joinResult.userSig || joinResult;
+
+    // 如果当前会议需要录像，开始录像
+    if (authenticatePayload.isMaster && conference.options?.setting?.record && !conference.options?.recordTaskId) {
+      const recordTask = await trtc.startRecord({
+        roomId: conference.id,
+        roomIdType: 1,
+        options: conference.options?.setting
+      });
+      conference.options = Object.assign({}, conference.options, {
+        recordTaskId: recordTask.id
+      });
+      await conference.save();
     }
 
     return Object.assign(
@@ -377,7 +421,7 @@ module.exports = fp(async (fastify, options) => {
       {
         member,
         conference,
-        sign: getUserSig(id, conference.options?.setting)
+        sign
       }
     );
   };
@@ -392,47 +436,27 @@ module.exports = fp(async (fastify, options) => {
       return;
     }
     await getMember({ id, conferenceId });
-    const client = getTrtcClient();
-    const robotUserSig = getUserSig(`robot_${conference.id}`, conference.options?.setting);
 
-    if (conference.options?.aiTranscription) {
-      try {
-        const { Status } = await client.DescribeAIConversation({
-          SdkAppId: robotUserSig.sdkAppId,
-          TaskId: conference.options?.aiTranscription?.TaskId
-        });
-        if (Status !== 'Stopped') {
-          return;
-        }
-      } catch (e) {
-        console.error(e);
-      }
-    }
-
-    const res = await client.StartAITranscription({
-      SdkAppId: robotUserSig.sdkAppId,
-      RoomId: conference.id,
-      RoomIdType: 1,
-      TranscriptionParams: {
-        UserId: robotUserSig.userId,
-        UserSig: robotUserSig.userSig
-      },
-      RecognizeConfig: {
-        Language: conference.options?.setting?.language || options?.language,
-        HotWordList: conference.options?.setting?.hotWordList || options?.hotWordList
-      }
+    const existingTaskId = conference.options?.aiTranscription?.id;
+    const task = await trtc.startAITranscription({
+      roomId: conference.id,
+      language: conference.options?.setting?.language || options?.language,
+      hotWordList: conference.options?.setting?.hotWordList || options?.hotWordList,
+      taskId: existingTaskId,
+      options: conference.options?.setting
     });
 
     conference.options = Object.assign({}, conference.options, {
-      aiTranscription: res
+      aiTranscription: task.toJSON ? task.toJSON() : task
     });
 
     await conference.save();
   };
 
-  const recordAITranscription = async (authenticatePayload, { records }) => {
+  const recordAITranscription = async (authenticatePayload, { records, messages } = {}) => {
     const { id, conferenceId } = authenticatePayload;
-    if (records.length === 0) {
+    const currentRecords = records || (messages || []).flatMap(message => message.records || []);
+    if (currentRecords.length === 0) {
       return;
     }
     const conference = await getConference({ id: conferenceId, status: 0 });
@@ -454,7 +478,7 @@ module.exports = fp(async (fastify, options) => {
     }
 
     const newContent = (aiTranscriptionContent.content || []).slice(0);
-    newContent.push(...records);
+    newContent.push(...currentRecords);
 
     aiTranscriptionContent.content = newContent;
 
@@ -471,14 +495,7 @@ module.exports = fp(async (fastify, options) => {
       return;
     }
     await getMember({ id, conferenceId });
-    const client = getTrtcClient();
-    try {
-      if (conference.options?.aiTranscription) {
-        await client.StopAITranscription({
-          TaskId: conference.options?.aiTranscription.TaskId
-        });
-      }
-    } catch (e) {}
+    await stopConferenceAITranscription(conference);
   };
 
   const removeMember = async (authenticatePayload, { id }) => {
@@ -496,159 +513,122 @@ module.exports = fp(async (fastify, options) => {
     }
     await member.destroy();
     //检查成员是否已经进入会议，调用trtc服务端接口踢出用户
-    const client = getTrtcClient();
-    const { appId } = getTrtcParams(conference.options?.setting);
-    await client.RemoveUserByStrRoomId({
-      SdkAppId: appId,
-      RoomId: conference.id,
-      UserIds: [member.id]
+    await trtc.removeMember({
+      userId: member.id,
+      roomId: conference.id,
+      options: conference.options?.setting
     });
   };
 
   const endConference = async (authenticatePayload, { id }) => {
     const { conferenceId, isMaster } = authenticatePayload;
-    if (conferenceId !== id) {
+    if (id && String(conferenceId) !== String(id)) {
       throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
     }
     if (!isMaster) {
       throw new Error('Only the master can end the conference');
     }
-    const conference = await getConference({ id: conferenceId });
+    const conference = await getConference({ id: conferenceId, status: 0 });
 
-    await stopAITranscription(authenticatePayload);
-
-    conference.status = 1;
-    await conference.save();
-    const client = getTrtcClient();
-    // 调用TRTC服务端API结束会议
-    const { appId } = getTrtcParams(conference.options?.setting);
-    await client.DismissRoomByStrRoomId({
-      SdkAppId: appId,
-      RoomId: conferenceId
-    });
-    //会议结束后如果开启了会议录像，添加一个获取录像的task
-    if (conference.options?.setting?.record) {
-      await fastify.task.services.create({
-        userId: conference.userId,
-        type: 'record-video',
-        targetId: conference.id,
-        targetType: 'conference',
-        runnerType: 'system',
-        input: {
-          conferenceId: conference.id,
-          sdkAppId: appId,
-          roomId: conferenceId
-        },
-        delay: 300
-      });
+    if (conference.options?.setting?.speech) {
+      await getMember({ id: authenticatePayload.id, conferenceId });
     }
+    await forceEndConference(conference);
   };
 
-  const getConferenceRecordVideo = async ({ conferenceId, sdkAppId, roomId }) => {
-    const conference = await models.conference.findByPk(conferenceId);
-    if (!conference) {
-      throw new Error('Conference does not exist');
-    }
-
-    const cos = getCosClient();
-    const bucket = get(options, 'tencentcloud.cos.bucket');
-    const region = get(options, 'tencentcloud.cos.region');
-
-    const decode = input => {
-      const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
-      return Buffer.from(replaced, 'base64').toString('utf8');
-    };
-
-    // 列出COS桶中指定前缀的录制文件
-    const { Contents } = await cos.getBucket({
-      Bucket: bucket,
-      Region: region,
-      Prefix: `${sdkAppId}/`
+  const forceEndExpiredConferences = async () => {
+    const rows = await models.conference.findAll({
+      where: {
+        status: 0
+      },
+      include: models.member
     });
-
-    if (!Contents || Contents.length === 0) {
-      return;
-    }
-
+    const expiredConferences = rows.filter(conference => isConferenceExpired(conference));
     const results = [];
-
-    for (const item of Contents) {
-      const filename = path.basename(item.Key).split('?')[0];
-      const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
-
-      // 解析TRTC录制文件名格式: SdkAppId_RoomId_UserId_s_UserId_UserId_e_MediaId
-      const match = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
-      if (!match) {
-        continue;
+    for (const conference of expiredConferences) {
+      try {
+        await forceEndConference(conference);
+        results.push({ id: conference.id, success: true });
+      } catch (error) {
+        console.error('Failed to force end expired conference:', error);
+        results.push({ id: conference.id, success: false, error });
       }
-
-      const [, , RoomId, UserId, MediaId] = match;
-      const decodedRoomId = decode(RoomId);
-
-      // 只处理当前会议房间的录制文件
-      if (decodedRoomId !== roomId) {
-        continue;
-      }
-
-      // 获取带签名的文件URL用于下载
-      const url = cos.getObjectUrl({
-        Bucket: bucket,
-        Region: region,
-        Key: item.Key,
-        Sign: true
-      });
-
-      // 上传到文件管理器
-      const { id: fileId } = await fastify.fileManager.services.uploadFromUrl({ url });
-
-      results.push(fileId);
-
-      const memberId = decode(UserId);
-      const target = { fileId, filename };
-      const list = get(conference.options, `recordFiles.${memberId}.${MediaId}`) || [];
-      list.push(target);
-
-      conference.options = Object.assign({}, conference.options, {
-        recordFilesAchieved: true,
-        recordFiles: Object.assign({}, get(conference.options, 'recordFiles'), {
-          [memberId]: Object.assign({}, get(conference.options, `recordFiles.${memberId}`), {
-            [MediaId]: uniqBy(list, 'fileId')
-          })
-        })
-      });
     }
-
-    await conference.save();
-
     return results;
   };
 
   const cancelConference = async (authenticatePayload, { id }) => {
     const { conferenceId, isMaster } = authenticatePayload;
-    if (conferenceId !== id) {
-      throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
+    const conference = await getConference({ id: conferenceId || id, status: 0 });
+    if (conferenceId) {
+      if (id && String(conferenceId) !== String(id)) {
+        throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
+      }
+      if (!isMaster) {
+        throw new Error('Only the master can cancel the conference');
+      }
+    } else if (conference.userId !== authenticatePayload.id) {
+      throw new Error('Only the conference creator can perform this operation');
     }
-    if (!isMaster) {
-      throw new Error('Only the master can cancel the conference');
+    if (conference.startTime && dayjs().isAfter(dayjs(conference.startTime))) {
+      throw new Error('The conference has already started and cannot be canceled');
     }
-    const conference = await getConference({ id: conferenceId, status: 0 });
-    await stopAITranscription(authenticatePayload);
     conference.status = 2;
     await conference.save();
   };
 
-  const cancelConferenceById = async (authenticatePayload, { id }) => {
-    const { id: userId } = authenticatePayload;
-    const conference = await getConference({ id, status: 0 });
-    if (conference.userId !== userId) {
-      throw new Error('Only the conference creator can perform this operation');
+  const saveRecordVideo = async ({ conferenceId, roomId, results }) => {
+    const conference = await models.conference.findByPk(conferenceId);
+    if (!conference) {
+      throw new Error('Conference does not exist');
     }
-    conference.status = 2;
+
+    const recordFiles = {};
+    await Promise.all(
+      results.map(async fileId => {
+        const file = await fastify.fileManager.services.getFileInfo({
+          id: fileId
+        });
+
+        const filename = file.filename;
+        const filenameWithoutExtension = filename.substring(0, filename.lastIndexOf('.'));
+        const decode = input => {
+          const replaced = input.replace(/-/g, '/').replace(/\./g, '=');
+          return Buffer.from(replaced, 'base64').toString('utf8');
+        };
+
+        const match = filenameWithoutExtension.match(/^(.+)_(.+)_UserId_s_(.+)_UserId_e_(.+)$/);
+
+        if (!recordFiles['all']) {
+          recordFiles['all'] = [];
+        }
+        recordFiles['all'].push({ fileId, filename });
+        if (!match) {
+          return;
+        }
+        const [, , RoomId, UserId, MediaId] = match;
+        const decodedRoomId = decode(RoomId);
+        const memberId = decode(UserId);
+        if (decodedRoomId !== String(roomId)) {
+          return;
+        }
+        if (!recordFiles[memberId]) {
+          recordFiles[memberId] = [];
+        }
+        recordFiles[memberId].push({ fileId, filename });
+      })
+    );
+
+    conference.options = Object.assign({}, conference.options, {
+      recordFilesAchieved: true,
+      recordFiles
+    });
+
     await conference.save();
   };
 
   Object.assign(fastify[options.name].services, {
-    getUserSig,
+    saveRecordVideo,
     createConference,
     saveConference,
     deleteConference,
@@ -659,17 +639,16 @@ module.exports = fp(async (fastify, options) => {
     enterConference,
     saveMember,
     inviteMember,
-    inviteMemberFormUser,
+    inviteMemberFromUser,
     getMemberShorten,
     getConference,
     joinConference,
     removeMember,
     endConference,
+    forceEndExpiredConferences,
     cancelConference,
-    cancelConferenceById,
     startAITranscription,
     stopAITranscription,
-    recordAITranscription,
-    getConferenceRecordVideo
+    recordAITranscription
   });
 });
