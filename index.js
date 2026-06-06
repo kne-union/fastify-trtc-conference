@@ -111,6 +111,6 @@ module.exports = fp(
   },
   {
     name: 'fastify-trtc-conference',
-    dependencies: ['fastify-task', 'fastify-file-manager', 'fastify-trtc', 'fastify-cron']
+    dependencies: ['fastify-task', 'fastify-file-manager', 'fastify-cron']
   }
 );
