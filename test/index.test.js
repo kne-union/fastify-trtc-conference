@@ -247,7 +247,6 @@ describe('@kne/fastify-trtc-conference', function () {
       const pluginPath = path.resolve(__dirname, '../index.js');
       const originalLoad = Module._load;
       const dependencyStubs = new Map([
-        ['@kne/fastify-tencent', async () => {}],
         ['@kne/fastify-trtc', async () => {}],
         ['@kne/fastify-shorten', async () => {}],
         ['@kne/fastify-namespace', async () => {}]
@@ -281,12 +280,12 @@ describe('@kne/fastify-trtc-conference', function () {
 
       await plugin(fastify, { name: 'conference', tencentcloud: { credential: { secretId: 'sid', secretKey: 'skey' }, cos: { region: 'ap', bucket: 'bucket' } } });
 
-      const namespaceOptions = registrations[3].options.options;
-      expect(registrations).to.have.length(4);
-      expect(registrations[0].options.oss).to.deep.equal({ accessKeyId: 'sid', accessKeySecret: 'skey', region: 'ap', bucket: 'bucket' });
-      expect(registrations[1].options.name).to.equal('trtc');
-      expect(registrations[2].options.name).to.equal('trtcConferenceShorten');
-      expect(registrations[3].options.name).to.equal('conference');
+      const namespaceOptions = registrations[2].options.options;
+      expect(registrations).to.have.length(3);
+      expect(registrations[0].options.name).to.equal('trtc');
+      expect(registrations[0].options.cos).to.deep.equal({ accessKeyId: 'sid', accessKeySecret: 'skey', region: 'ap', bucket: 'bucket' });
+      expect(registrations[1].options.name).to.equal('trtcConferenceShorten');
+      expect(registrations[2].options.name).to.equal('conference');
       expect(cronJobs[0]).to.include({ name: 'conference:forceEndExpiredConferences', cronTime: '*/5 * * * *', startWhenReady: true });
       expect(namespaceOptions.getOpenApiAuthenticate()).to.equal('open-api-authenticate');
       expect(namespaceOptions.getUserAuthenticate()).to.equal('user-authenticate');
@@ -301,7 +300,6 @@ describe('@kne/fastify-trtc-conference', function () {
       const pluginPath = path.resolve(__dirname, '../index.js');
       const originalLoad = Module._load;
       const dependencyStubs = new Map([
-        ['@kne/fastify-tencent', async () => {}],
         ['@kne/fastify-trtc', async () => {}],
         ['@kne/fastify-shorten', async () => {}],
         ['@kne/fastify-namespace', async () => {}]
