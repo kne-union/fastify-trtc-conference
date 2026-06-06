@@ -24,7 +24,6 @@ Fastify 应用
 fastify-trtc-conference（插件注册）
   ↓
   ├─→ @kne/fastify-trtc（TRTC 房间管理、录像、AI转写）
-  ├─→ @kne/fastify-tencent（腾讯云COS对象存储）
   ├─→ @kne/fastify-shorten（短链接/邀请码签名）
   ├─→ @kne/fastify-namespace（模块命名空间组织）
   └─→ fastify-cron（定时任务：强制结束过期会议）

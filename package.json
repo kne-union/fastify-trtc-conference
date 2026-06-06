@@ -1,6 +1,6 @@
 {
   "name": "@kne/fastify-trtc-conference",
-  "version": "1.0.23-alpha.2",
+  "version": "1.0.23-alpha.3",
   "description": "基于腾讯云TRTC的Fastify视频会议插件，提供会议创建、成员管理、录像、AI转写等功能",
   "main": "index.js",
   "scripts": {
@@ -70,7 +70,6 @@
   },
   "dependencies": {
     "@kne/fastify-shorten": "^1.0.12",
-    "@kne/fastify-tencent": "^0.1.3",
     "@kne/fastify-trtc": "^1.0.0-alpha.1",
     "dayjs": "^1.11.13",
     "lodash": "^4.17.21"
