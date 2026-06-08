@@ -18,6 +18,10 @@ const createEntity = data => {
         this.saveCount += 1;
         return this;
       },
+      async update(data) {
+        Object.assign(this, data);
+        return this;
+      },
       async destroy() {
         this.destroyCount += 1;
         this.destroyed = true;
@@ -102,7 +106,7 @@ const createMockModels = () => {
   return { models, conferences, members, aiContents };
 };
 
-const createServiceContext = async () => {
+const createServiceContext = async (optionOverrides = {}) => {
   const { models, conferences, members, aiContents } = createMockModels();
   const signedPayloads = new Map();
   let signCount = 1;
@@ -116,7 +120,8 @@ const createServiceContext = async () => {
       stopAITranscriptions: [],
       dismisses: [],
       stopRecords: [],
-      removeMembers: []
+      removeMembers: [],
+      instanceEventLists: []
     }
   };
 
@@ -149,6 +154,12 @@ const createServiceContext = async () => {
     },
     async removeMember(payload) {
       calls.trtc.removeMembers.push(payload);
+    },
+    instanceEvent: {
+      async list(authenticatePayload, payload) {
+        calls.trtc.instanceEventLists.push({ authenticatePayload, payload });
+        return { pageData: [{ id: 'event-1' }], totalCount: 1 };
+      }
     }
   };
 
@@ -188,10 +199,10 @@ const createServiceContext = async () => {
 
   const options = {
     name: 'conference',
-    trtcName: 'trtc',
     shortenName: 'shorten',
     language: 'zh',
-    hotWordList: ['Fastify']
+    hotWordList: ['Fastify'],
+    ...optionOverrides
   };
   await require('../libs/services/main')(fastify, options);
   return { fastify, services: fastify.conference.services, models, conferences, members, aiContents, signedPayloads, calls };
@@ -283,6 +294,7 @@ describe('@kne/fastify-trtc-conference', function () {
       const namespaceOptions = registrations[2].options.options;
       expect(registrations).to.have.length(3);
       expect(registrations[0].options.name).to.equal('trtc');
+      expect(registrations[0].options.credential).to.deep.equal({ secretId: 'sid', secretKey: 'skey' });
       expect(registrations[0].options.cos).to.deep.equal({ accessKeyId: 'sid', accessKeySecret: 'skey', region: 'ap', bucket: 'bucket' });
       expect(registrations[1].options.name).to.equal('trtcConferenceShorten');
       expect(registrations[2].options.name).to.equal('conference');
@@ -293,7 +305,8 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(namespaceOptions.getUserModel()).to.equal('user-model');
       await cronJobs[0].onTick(fastify);
       expect(forceEndCallCount).to.equal(1);
-      expect(appendedTasks[0].task.recordVideo({ id: 1 })).to.deep.equal({ saved: { id: 1 } });
+      expect(appendedTasks[0].tasks['record-video']({ task: { input: { id: 1 } } })).to.deep.equal({ saved: { id: 1 } });
+      expect(appendedTasks[0].tasks['record-video']({ task: { input: { id: 1 } }, result: { id: 2 } })).to.deep.equal({ saved: { id: 2 } });
     });
 
     it('should throw default authenticate dependency errors when required plugins are absent', async () => {
@@ -342,15 +355,18 @@ describe('@kne/fastify-trtc-conference', function () {
         'startAITranscription',
         'stopAITranscription',
         'recordAITranscription',
+        'recordClientEvents',
         'endConference',
         'cancelConference',
         'getConferenceList',
         'getAiTranscriptionContentById',
+        'getTrtcInstanceEventsById',
         'createConference',
         'saveConference',
         'deleteConference',
         'getMemberShorten',
         'inviteMemberFromUser',
+        'getConferenceDetailByShorten',
         'getConferenceDetailById'
       ].forEach(name => {
         services[name] = async (...args) => {
@@ -382,13 +398,16 @@ describe('@kne/fastify-trtc-conference', function () {
       });
 
       expect(routes.map(route => route.url)).to.include.members(['/api/conference/detail', '/api/conference/create', '/api/conference/inviteMemberFromUser']);
-      await routes.find(route => route.url === '/api/conference/detail').handler({ authenticatePayload: { conferenceId: '1' } });
+      const detailRoute = routes.find(route => route.url === '/api/conference/detail');
+      expect(detailRoute.config.onRequest).to.equal(undefined);
+      await detailRoute.handler({ query: { code: 'invite-code' }, headers: {} });
       await routes.find(route => route.url === '/api/conference/saveMember').handler({ authenticatePayload: { id: '1' }, body: { nickname: 'New' } });
       await routes.find(route => route.url === '/api/conference/create').handler({ userInfo: { id: 'user-1' }, body: { name: 'Daily' } });
       await routes.find(route => route.url === '/api/conference/list').handler({ authenticatePayload: { id: 'user-1' }, query: { perPage: 20, currentPage: 1 } });
 
       expect(routes.find(route => route.url === '/api/conference/list').config.onRequest[0]).to.equal(userAuthenticate);
-      expect(serviceCalls.map(call => call.name)).to.deep.equal(['getConferenceDetail', 'saveMember', 'createConference', 'getConferenceList']);
+      expect(serviceCalls.map(call => call.name)).to.deep.equal(['getConferenceDetailByShorten', 'saveMember', 'createConference', 'getConferenceList']);
+      expect(serviceCalls[0].args).to.deep.equal(['invite-code']);
     });
 
     it('should forward every user route to the expected service', async () => {
@@ -401,7 +420,7 @@ describe('@kne/fastify-trtc-conference', function () {
         getUserInfo: request => request.userInfo
       });
       const expectedServices = {
-        '/api/conference/detail': 'getConferenceDetail',
+        '/api/conference/detail': 'getConferenceDetailByShorten',
         '/api/conference/saveMember': 'saveMember',
         '/api/conference/inviteMember': 'inviteMember',
         '/api/conference/join': 'joinConference',
@@ -410,10 +429,12 @@ describe('@kne/fastify-trtc-conference', function () {
         '/api/conference/startAITranscription': 'startAITranscription',
         '/api/conference/stopAITranscription': 'stopAITranscription',
         '/api/conference/recordAITranscription': 'recordAITranscription',
+        '/api/conference/recordClientEvents': 'recordClientEvents',
         '/api/conference/end': 'endConference',
         '/api/conference/cancel': 'cancelConference',
         '/api/conference/list': 'getConferenceList',
         '/api/conference/getAiTranscriptionContent': 'getAiTranscriptionContentById',
+        '/api/conference/getTrtcInstanceEvents': 'getTrtcInstanceEventsById',
         '/api/conference/create': 'createConference',
         '/api/conference/save': 'saveConference',
         '/api/conference/delete': 'deleteConference',
@@ -426,7 +447,8 @@ describe('@kne/fastify-trtc-conference', function () {
           authenticatePayload: { id: 'member-1', conferenceId: 'conference-1' },
           userInfo: { id: 'user-1' },
           body: { id: 'conference-1', name: 'Daily' },
-          query: { id: 'conference-1', perPage: 20, currentPage: 1 }
+          query: { id: 'conference-1', code: 'invite-code', perPage: 20, currentPage: 1 },
+          headers: {}
         });
       }
 
@@ -513,6 +535,7 @@ describe('@kne/fastify-trtc-conference', function () {
       const { services, conferences, calls } = await createServiceContext();
       const expiredConference = createEntity({
         id: 'expired',
+        name: 'Expired Meeting',
         userId: 'user-1',
         status: 0,
         startTime: new Date(Date.now() - 60 * 60 * 1000),
@@ -533,7 +556,29 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(calls.trtc.stopAITranscriptions[0]).to.deep.equal({ id: 'ai-task-id', roomId: 'expired', options: expiredConference.options.setting });
       expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: 'expired', options: expiredConference.options.setting });
       expect(calls.trtc.stopRecords[0]).to.deep.equal({ id: 'record-task-id', roomId: 'expired', options: expiredConference.options.setting });
-      expect(calls.taskCreates[0]).to.include({ type: 'record-video', targetId: 'expired', targetType: 'conference' });
+      expect(calls.taskCreates[0]).to.include({ type: 'record-video', targetId: 'expired', targetType: 'conference', targetName: 'Expired Meeting' });
+    });
+
+    it('should finish expired conference when trtc room no longer exists', async () => {
+      const { fastify, services, conferences } = await createServiceContext();
+      const expiredConference = createEntity({
+        id: 'missing-room',
+        name: 'Missing Room Meeting',
+        userId: 'user-1',
+        status: 0,
+        startTime: new Date(Date.now() - 60 * 60 * 1000),
+        duration: 1,
+        options: {}
+      });
+      conferences.set(expiredConference.id, expiredConference);
+      fastify.trtc.services.dismiss = async () => {
+        throw new Error('room not exist');
+      };
+
+      const result = await services.forceEndExpiredConferences();
+
+      expect(result).to.deep.equal([{ id: 'missing-room', success: true }]);
+      expect(expiredConference.status).to.equal(1);
     });
 
     it('should use seconds when checking conference expiration', async () => {
@@ -624,15 +669,33 @@ describe('@kne/fastify-trtc-conference', function () {
 
       expect(result.sign).to.deep.equal({ sdkAppId: 1400000000, userId: member.id, userSig: 'mock-user-sig' });
       expect(conference.options.recordTaskId).to.equal('record-task-id');
-      expect(calls.trtc.startRecords[0]).to.deep.equal({ roomId: conference.id, roomIdType: 1, options: conference.options.setting });
+      expect(calls.trtc.startRecords[0]).to.deep.equal({ roomId: conference.id, roomIdType: 0, options: conference.options.setting, recordParams: { StreamType: 0 } });
 
       conference.startTime = new Date(Date.now() + 60 * 1000);
       await expectReject(services.enterConference({ id: member.id, conferenceId: conference.id }), 'The conference has not yet started');
     });
 
+    it('should set audio or video stream type when starting record', async () => {
+      const { services, conferences, members, calls } = await createServiceContext();
+      const audioConference = createEntity({ id: 'audio-conference', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 1000), duration: 30, options: { setting: { record: 'audio' } } });
+      const videoConference = createEntity({ id: 'video-conference', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 1000), duration: 30, options: { setting: { record: 'video' } } });
+      const audioMaster = createEntity({ id: 'audio-master', conferenceId: audioConference.id, isMaster: true });
+      const videoMaster = createEntity({ id: 'video-master', conferenceId: videoConference.id, isMaster: true });
+      conferences.set(audioConference.id, audioConference);
+      conferences.set(videoConference.id, videoConference);
+      members.set(audioMaster.id, audioMaster);
+      members.set(videoMaster.id, videoMaster);
+
+      await services.enterConference({ id: audioMaster.id, conferenceId: audioConference.id, isMaster: true });
+      await services.enterConference({ id: videoMaster.id, conferenceId: videoConference.id, isMaster: true });
+
+      expect(calls.trtc.startRecords[0].recordParams).to.deep.equal({ StreamType: 1 });
+      expect(calls.trtc.startRecords[1].recordParams).to.deep.equal({ StreamType: 0 });
+    });
+
     it('should remove members, end conference and create record task', async () => {
       const { services, conferences, members, calls } = await createServiceContext();
-      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 0, options: { setting: { record: true, speech: true }, recordTaskId: 'record-task-id', aiTranscription: { id: 'ai-task-id' } } });
+      const conference = createEntity({ id: 'conference-1', name: 'Weekly Meeting', userId: 'user-1', status: 0, options: { setting: { record: true, speech: true }, recordTaskId: 'record-task-id', aiTranscription: { id: 'ai-task-id' } } });
       const master = createEntity({ id: 'master-1', conferenceId: conference.id, isMaster: true });
       const guest = createEntity({ id: 'guest-1', conferenceId: conference.id, isMaster: false, shorten: 'guest-shorten' });
       conferences.set(conference.id, conference);
@@ -647,7 +710,7 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(conference.status).to.equal(1);
       expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: conference.id, options: conference.options.setting });
       expect(calls.trtc.stopRecords[0]).to.deep.equal({ id: 'record-task-id', roomId: conference.id, options: conference.options.setting });
-      expect(calls.taskCreates[0]).to.include({ type: 'record-video', targetId: conference.id, targetType: 'conference' });
+      expect(calls.taskCreates[0]).to.include({ type: 'record-video', targetId: conference.id, targetType: 'conference', targetName: 'Weekly Meeting' });
       await expectReject(services.removeMember({ conferenceId: conference.id, isMaster: false }, { id: guest.id }), 'Only the master can remove members');
       await expectReject(services.endConference({ id: master.id, conferenceId: conference.id, isMaster: false }, { id: conference.id }), 'Only the master can end the conference');
       await expectReject(
@@ -666,6 +729,11 @@ describe('@kne/fastify-trtc-conference', function () {
 
       conference.status = 0;
       await services.cancelConference({ id: 'user-1' }, { id: conference.id });
+      expect(conference.status).to.equal(2);
+
+      conference.status = 1;
+      conference.startTime = new Date(Date.now() + 60 * 1000);
+      await services.cancelConference({ conferenceId: conference.id, isMaster: true }, { id: conference.id });
       expect(conference.status).to.equal(2);
 
       conference.status = 0;
@@ -719,6 +787,114 @@ describe('@kne/fastify-trtc-conference', function () {
       await expectReject(services.stopAITranscription({ id: member.id, conferenceId: conference.id, isMaster: false }), 'Only the master can stop the transcription');
     });
 
+    it('should get trtc instance events by conference id', async () => {
+      const { services, conferences, calls } = await createServiceContext();
+      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 1, options: {} });
+      conferences.set(conference.id, conference);
+
+      const result = await services.getTrtcInstanceEventsById({ id: 'user-1' }, { id: conference.id, perPage: 50, currentPage: 2 });
+
+      expect(result).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
+      expect(calls.trtc.instanceEventLists[0]).to.deep.equal({
+        authenticatePayload: { id: 'user-1' },
+        payload: { filter: { roomId: conference.id }, perPage: 50, currentPage: 2 }
+      });
+    });
+
+    it('should sync trtc instance events when list is empty', async () => {
+      const { services, conferences, fastify } = await createServiceContext();
+      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 1, options: { setting: { region: 'ap-guangzhou' } } });
+      const instanceCase = { id: 'case-1', roomId: conference.id };
+      const syncCalls = [];
+      let listCount = 0;
+      conferences.set(conference.id, conference);
+      fastify.trtc.models = {
+        instanceCase: {
+          async findOne(payload) {
+            expect(payload).to.deep.equal({ where: { roomId: conference.id } });
+            return instanceCase;
+          }
+        }
+      };
+      fastify.trtc.services.syncRoomUserEvents = async payload => {
+        syncCalls.push(payload);
+      };
+      fastify.trtc.services.instanceEvent.list = async () => {
+        listCount += 1;
+        return listCount === 1 ? { pageData: [], totalCount: 0 } : { pageData: [{ id: 'event-1' }], totalCount: 1 };
+      };
+
+      const result = await services.getTrtcInstanceEventsById({ id: 'user-1' }, { id: conference.id });
+
+      expect(result).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
+      expect(listCount).to.equal(2);
+      expect(syncCalls).to.deep.equal([{ instanceCase, options: conference.options.setting }]);
+    });
+
+    it('should record client trtc events and update instance user list', async () => {
+      const { services, conferences, members, fastify } = await createServiceContext();
+      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 0, options: {} });
+      const member = createEntity({ id: 'member-1', conferenceId: conference.id, isMaster: true });
+      const instanceEvents = [];
+      const instanceCase = createEntity({ id: 'case-1', roomId: conference.id, userList: {} });
+      conferences.set(conference.id, conference);
+      members.set(member.id, member);
+      fastify.trtc.models = {
+        instanceCase: {
+          async findOne(payload) {
+            expect(payload).to.deep.equal({ where: { roomId: conference.id } });
+            return instanceCase;
+          }
+        },
+        instanceEvent: {
+          async create(data) {
+            const event = createEntity({ id: `event-${instanceEvents.length + 1}`, ...data });
+            instanceEvents.push(event);
+            return event;
+          }
+        }
+      };
+
+      await services.recordClientEvents(
+        { id: member.id, conferenceId: conference.id },
+        {
+          events: [
+            { type: 'enter', userId: member.id, time: '2026-06-08T05:00:00.000Z', data: { userType: 'local' } },
+            { type: 'statistics', userId: member.id, time: '2026-06-08T05:00:02.000Z', data: { rtt: 20 } }
+          ]
+        }
+      );
+
+      expect(instanceEvents.map(item => item.code)).to.deep.equal(['Client.enter', 'Client.statistics']);
+      expect(instanceEvents[1].payload.source).to.equal('ClientSDK');
+      expect(new Date(instanceCase.userList[member.id].startTime).toISOString()).to.equal('2026-06-08T05:00:00.000Z');
+    });
+
+    it('should ignore client trtc events when paid rest api query is enabled', async () => {
+      const { services, conferences, members, fastify } = await createServiceContext({ enableRestApiQuery: true });
+      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 0, options: {} });
+      const member = createEntity({ id: 'member-1', conferenceId: conference.id, isMaster: true });
+      const instanceEvents = [];
+      conferences.set(conference.id, conference);
+      members.set(member.id, member);
+      fastify.trtc.models = {
+        instanceCase: {
+          async findOne() {
+            throw new Error('should not query instance case');
+          }
+        },
+        instanceEvent: {
+          async create(data) {
+            instanceEvents.push(data);
+          }
+        }
+      };
+
+      await services.recordClientEvents({ id: member.id, conferenceId: conference.id }, { events: [{ type: 'enter', userId: member.id }] });
+
+      expect(instanceEvents).to.have.length(0);
+    });
+
     it('should save record files for all files and matching room members', async () => {
       const { services, conferences, fastify } = await createServiceContext();
       const encode = input => Buffer.from(input, 'utf8').toString('base64').replace(/\//g, '-').replace(/=/g, '.');
@@ -753,7 +929,7 @@ describe('@kne/fastify-trtc-conference', function () {
       };
       const result = await taskRunner(
         fastify,
-        { trtcName: 'trtc' },
+        {},
         {
           task: { input: { recordTaskId: 'record-task-id', conferenceId: 'conference-1', roomId: 'room-1' } },
           polling: async callback => callback()
@@ -767,7 +943,7 @@ describe('@kne/fastify-trtc-conference', function () {
       const taskRunner = require('../libs/tasks/record-video');
       const result = await taskRunner(
         { trtc: { services: { checkRecord: async () => ({ result: [] }) } } },
-        { trtcName: 'trtc' },
+        {},
         { task: { input: { recordTaskId: 'record-task-id', conferenceId: 'conference-1', roomId: 'room-1' } }, polling: async callback => callback() }
       );
 
