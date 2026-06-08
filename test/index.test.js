@@ -847,6 +847,9 @@ describe('@kne/fastify-trtc-conference', function () {
           }
         },
         instanceEvent: {
+          async findAll() {
+            return instanceEvents;
+          },
           async create(data) {
             const event = createEntity({ id: `event-${instanceEvents.length + 1}`, ...data });
             instanceEvents.push(event);
@@ -860,6 +863,7 @@ describe('@kne/fastify-trtc-conference', function () {
         {
           events: [
             { type: 'enter', userId: member.id, time: '2026-06-08T05:00:00.000Z', data: { userType: 'local' } },
+            { type: 'statistics', userId: member.id, time: '2026-06-08T05:00:02.000Z', data: { rtt: 20 } },
             { type: 'statistics', userId: member.id, time: '2026-06-08T05:00:02.000Z', data: { rtt: 20 } }
           ]
         }
@@ -867,6 +871,7 @@ describe('@kne/fastify-trtc-conference', function () {
 
       expect(instanceEvents.map(item => item.code)).to.deep.equal(['Client.enter', 'Client.statistics']);
       expect(instanceEvents[1].payload.source).to.equal('ClientSDK');
+      expect(instanceEvents[1].payload.reporterId).to.equal(member.id);
       expect(new Date(instanceCase.userList[member.id].startTime).toISOString()).to.equal('2026-06-08T05:00:00.000Z');
     });
 
