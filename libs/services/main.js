@@ -566,10 +566,49 @@ module.exports = fp(async (fastify, options) => {
       return;
     }
     const userList = Object.assign({}, instanceCase.userList);
+    const stableStringify = value => {
+      if (value === null || typeof value !== 'object') {
+        return JSON.stringify(value);
+      }
+      if (Array.isArray(value)) {
+        return `[${value.map(stableStringify).join(',')}]`;
+      }
+      return `{${Object.keys(value)
+        .sort()
+        .map(key => `${JSON.stringify(key)}:${stableStringify(value[key])}`)
+        .join(',')}}`;
+    };
+    const getEventKey = ({ eventType, reporterId, userId, time, data }) => {
+      return [eventType, reporterId, userId, new Date(time).toISOString(), stableStringify(data || {})].join('|');
+    };
+    const existingEvents = instanceEventModel.findAll
+      ? await instanceEventModel.findAll({
+          where: { trtcInstanceCaseId: instanceCase.id }
+        })
+      : [];
+    const eventKeys = new Set(
+      existingEvents
+        .filter(item => item.payload?.source === 'ClientSDK')
+        .map(item =>
+          getEventKey({
+            eventType: item.payload.eventType,
+            reporterId: item.payload.reporterId || item.payload.userId,
+            userId: item.payload.userId,
+            time: item.time,
+            data: item.payload.event?.data
+          })
+        )
+    );
     for (const event of events) {
       const time = event.time ? new Date(event.time) : new Date();
+      const reporterId = id;
       const userId = event.userId || id;
       const eventType = event.type || 'client';
+      const eventKey = getEventKey({ eventType, reporterId, userId, time, data: event.data });
+      if (eventKeys.has(eventKey)) {
+        continue;
+      }
+      eventKeys.add(eventKey);
       if (eventType === 'enter') {
         userList[userId] = Object.assign({}, userList[userId], {
           startTime: time,
@@ -590,6 +629,7 @@ module.exports = fp(async (fastify, options) => {
         payload: {
           source: 'ClientSDK',
           roomId: conference.id,
+          reporterId,
           userId,
           eventType,
           event
