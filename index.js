@@ -12,9 +12,9 @@ module.exports = fp(
         shortenHeaderName: 'x-trtc-conference-code',
         prefix: '/api/conference',
         dbTableNamePrefix: 't_conference_',
-        trtcName: 'trtc',
         appId: '',
         appSecret: '',
+        enableRestApiQuery: false,
         expire: 3 * 60 * 60,
         forceEndExpiredConferencesCronTime: '*/5 * * * *',
         getOpenApiAuthenticate: () => {
@@ -46,10 +46,11 @@ module.exports = fp(
       require('@kne/fastify-trtc'),
       Object.assign(
         {
-          name: options.trtcName,
+          name: 'trtc',
           dbTableNamePrefix: options.dbTableNamePrefix,
           appId: options.appId,
           appSecret: options.appSecret,
+          enableRestApiQuery: options.enableRestApiQuery,
           expire: options.expire,
           getParams: options.getParams
         },
@@ -101,9 +102,9 @@ module.exports = fp(
       // 注册录像获取任务类型
       fastify.task.services.append({
         dirs: [path.resolve(__dirname, './libs/tasks')],
-        task: {
-          recordVideo: target => {
-            return fastify[options.name].services.saveRecordVideo(target);
+        tasks: {
+          'record-video': ({ task, result }) => {
+            return fastify[options.name].services.saveRecordVideo(result || task.input);
           }
         }
       });

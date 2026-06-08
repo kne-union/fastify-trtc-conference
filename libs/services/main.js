@@ -5,10 +5,25 @@ dayjs.extend(duration);
 
 module.exports = fp(async (fastify, options) => {
   const { models } = fastify[options.name];
-  const trtc = fastify[options.trtcName].services;
+  const trtc = fastify.trtc.services;
 
   const isConferenceExpired = conference => {
     return conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'second')));
+  };
+
+  const getRecordParams = record => {
+    if (record === 'audio') {
+      return { StreamType: 1 };
+    }
+    if (record === 'video' || record === true) {
+      return { StreamType: 0 };
+    }
+    return {};
+  };
+
+  const isRoomNotExistError = error => {
+    const errorText = [error?.message, error?.code, error?.name, typeof error?.toString === 'function' ? error.toString() : String(error)].filter(Boolean).join(' ');
+    return /room\s+not\s+exist/i.test(errorText) || /room.*not.*exist/i.test(errorText);
   };
 
   const stopConferenceAITranscription = async conference => {
@@ -30,10 +45,17 @@ module.exports = fp(async (fastify, options) => {
 
   const finishConference = async conference => {
     // 调用TRTC服务端API结束会议
-    await trtc.dismiss({
-      roomId: conference.id,
-      options: conference.options?.setting
-    });
+    try {
+      await trtc.dismiss({
+        roomId: conference.id,
+        options: conference.options?.setting
+      });
+    } catch (e) {
+      if (!isRoomNotExistError(e)) {
+        throw e;
+      }
+      console.warn(`TRTC room already absent while finishing conference: ${conference.id}`);
+    }
     // 会议结束后如果开启了会议录像，添加一个获取录像的task
     if (conference.options?.setting?.record && conference.options?.recordTaskId) {
       // 停止录像任务
@@ -51,6 +73,7 @@ module.exports = fp(async (fastify, options) => {
         type: 'record-video',
         targetId: conference.id,
         targetType: 'conference',
+        targetName: conference.name,
         runnerType: 'system',
         input: {
           conferenceId: conference.id,
@@ -224,6 +247,14 @@ module.exports = fp(async (fastify, options) => {
     return member;
   };
 
+  const decodeShortenPayload = async shorten => {
+    if (!shorten) {
+      throw new Error('Invitation code is required');
+    }
+    const payload = await fastify[options.shortenName].services.decode(shorten);
+    return typeof payload === 'string' ? JSON.parse(payload) : payload;
+  };
+
   const getConferenceDetail = async authenticatePayload => {
     const { id, conferenceId, fromUser, inviterId, inviter: userInviter } = authenticatePayload;
     const conference = await getConference({ id: conferenceId });
@@ -234,6 +265,10 @@ module.exports = fp(async (fastify, options) => {
     const member = id && (await getMember({ id }));
     const inviter = fromUser ? userInviter : inviterId && (await getMember({ id: inviterId }));
     return { conference, member, inviter };
+  };
+
+  const getConferenceDetailByShorten = async shorten => {
+    return getConferenceDetail(await decodeShortenPayload(shorten));
   };
 
   const getConferenceDetailById = async (authenticatePayload, { id }) => {
@@ -255,6 +290,29 @@ module.exports = fp(async (fastify, options) => {
         conferenceId: conference.id
       }
     });
+  };
+
+  const getTrtcInstanceEventsById = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
+    const conference = await getConferenceDetailById(authenticatePayload, { id });
+    const query = {
+      filter: { roomId: conference.id },
+      perPage: Number(perPage) || 200,
+      currentPage: Number(currentPage) || 1
+    };
+    let result = await fastify.trtc.services.instanceEvent.list(authenticatePayload, query);
+    if ((result.pageData || []).length > 0) {
+      return result;
+    }
+    const instanceCaseModel = fastify.trtc.models?.instanceCase;
+    const instanceCase = instanceCaseModel && (await instanceCaseModel.findOne({ where: { roomId: conference.id } }));
+    if (instanceCase && fastify.trtc.services.syncRoomUserEvents) {
+      await fastify.trtc.services.syncRoomUserEvents({
+        instanceCase,
+        options: conference.options?.setting
+      });
+      result = await fastify.trtc.services.instanceEvent.list(authenticatePayload, query);
+    }
+    return result;
   };
 
   const saveMember = async (authenticatePayload, data) => {
@@ -407,8 +465,9 @@ module.exports = fp(async (fastify, options) => {
     if (authenticatePayload.isMaster && conference.options?.setting?.record && !conference.options?.recordTaskId) {
       const recordTask = await trtc.startRecord({
         roomId: conference.id,
-        roomIdType: 1,
-        options: conference.options?.setting
+        roomIdType: 0,
+        options: conference.options?.setting,
+        recordParams: getRecordParams(conference.options?.setting?.record)
       });
       conference.options = Object.assign({}, conference.options, {
         recordTaskId: recordTask.id
@@ -485,6 +544,62 @@ module.exports = fp(async (fastify, options) => {
     await aiTranscriptionContent.save();
   };
 
+  const recordClientEvents = async (authenticatePayload, { events = [] } = {}) => {
+    if (options.enableRestApiQuery) {
+      return;
+    }
+    const { id, conferenceId } = authenticatePayload;
+    if (!Array.isArray(events) || events.length === 0) {
+      return;
+    }
+    const conference = await getConference({ id: conferenceId });
+    await getMember({ id, conferenceId });
+    const instanceCaseModel = fastify.trtc.models?.instanceCase;
+    const instanceEventModel = fastify.trtc.models?.instanceEvent;
+    if (!instanceCaseModel || !instanceEventModel) {
+      return;
+    }
+    const instanceCase = await instanceCaseModel.findOne({
+      where: { roomId: conference.id }
+    });
+    if (!instanceCase) {
+      return;
+    }
+    const userList = Object.assign({}, instanceCase.userList);
+    for (const event of events) {
+      const time = event.time ? new Date(event.time) : new Date();
+      const userId = event.userId || id;
+      const eventType = event.type || 'client';
+      if (eventType === 'enter') {
+        userList[userId] = Object.assign({}, userList[userId], {
+          startTime: time,
+          status: 0,
+          client: event
+        });
+      }
+      if (eventType === 'exit') {
+        userList[userId] = Object.assign({}, userList[userId], {
+          exitTime: time,
+          status: 1,
+          client: event
+        });
+      }
+      await instanceEventModel.create({
+        code: `Client.${eventType}`,
+        time,
+        payload: {
+          source: 'ClientSDK',
+          roomId: conference.id,
+          userId,
+          eventType,
+          event
+        },
+        trtcInstanceCaseId: instanceCase.id
+      });
+    }
+    await instanceCase.update({ userList });
+  };
+
   const stopAITranscription = async authenticatePayload => {
     const { id, conferenceId, isMaster } = authenticatePayload;
     if (!isMaster) {
@@ -559,7 +674,13 @@ module.exports = fp(async (fastify, options) => {
 
   const cancelConference = async (authenticatePayload, { id }) => {
     const { conferenceId, isMaster } = authenticatePayload;
-    const conference = await getConference({ id: conferenceId || id, status: 0 });
+    const conference = await getConference({ id: conferenceId || id });
+    if (conference.status === 2) {
+      throw new Error('Conference has been canceled');
+    }
+    if (conference.status === 1 && !conference.startTime) {
+      throw new Error('Conference has ended');
+    }
     if (conferenceId) {
       if (id && String(conferenceId) !== String(id)) {
         throw new Error('The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information');
@@ -570,7 +691,7 @@ module.exports = fp(async (fastify, options) => {
     } else if (conference.userId !== authenticatePayload.id) {
       throw new Error('Only the conference creator can perform this operation');
     }
-    if (conference.startTime && dayjs().isAfter(dayjs(conference.startTime))) {
+    if (conference.startTime && !dayjs().isBefore(dayjs(conference.startTime))) {
       throw new Error('The conference has already started and cannot be canceled');
     }
     conference.status = 2;
@@ -634,8 +755,10 @@ module.exports = fp(async (fastify, options) => {
     deleteConference,
     getConferenceList,
     getConferenceDetail,
+    getConferenceDetailByShorten,
     getConferenceDetailById,
     getAiTranscriptionContentById,
+    getTrtcInstanceEventsById,
     enterConference,
     saveMember,
     inviteMember,
@@ -649,6 +772,7 @@ module.exports = fp(async (fastify, options) => {
     cancelConference,
     startAITranscription,
     stopAITranscription,
-    recordAITranscription
+    recordAITranscription,
+    recordClientEvents
   });
 });

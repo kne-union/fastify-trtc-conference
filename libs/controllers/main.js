@@ -8,15 +8,19 @@ module.exports = fp(async (fastify, options) => {
   fastify.get(
     `${options.prefix}/detail`,
     {
-      onRequest: [authenticate.code],
       schema: {
         description: '获取会议信息',
         summary: '获取会议信息',
-        query: {}
+        query: {
+          type: 'object',
+          properties: {
+            code: { type: 'string' }
+          }
+        }
       }
     },
     async request => {
-      return services.getConferenceDetail(request.authenticatePayload);
+      return services.getConferenceDetailByShorten(request.query.code || request.headers[options.shortenHeaderName]);
     }
   );
 
@@ -171,6 +175,30 @@ module.exports = fp(async (fastify, options) => {
   );
 
   fastify.post(
+    `${options.prefix}/recordClientEvents`,
+    {
+      onRequest: [authenticate.code],
+      schema: {
+        description: '记录客户端采集的TRTC事件和指标',
+        summary: '记录客户端TRTC事件和指标',
+        body: {
+          type: 'object',
+          properties: {
+            events: {
+              type: 'array',
+              items: { type: 'object' }
+            }
+          }
+        }
+      }
+    },
+    async request => {
+      await services.recordClientEvents(request.authenticatePayload, request.body);
+      return {};
+    }
+  );
+
+  fastify.post(
     `${options.prefix}/end`,
     {
       onRequest: [authenticate.code],
@@ -248,6 +276,28 @@ module.exports = fp(async (fastify, options) => {
     },
     async request => {
       return services.getAiTranscriptionContentById(request.authenticatePayload, request.query);
+    }
+  );
+
+  fastify.get(
+    `${options.prefix}/getTrtcInstanceEvents`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        summary: '获取会议TRTC房间事件',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            perPage: { type: 'number', default: 200 },
+            currentPage: { type: 'number', default: 1 }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getTrtcInstanceEventsById(request.authenticatePayload, request.query);
     }
   );
 
