@@ -21,6 +21,70 @@ module.exports = fp(async (fastify, options) => {
     return {};
   };
 
+  const getConferenceForMember = (conference, isMaster) => {
+    const currentConference = conference.toJSON ? conference.toJSON() : conference;
+    if (isMaster || currentConference.options?.documentVisibleAll) {
+      return currentConference;
+    }
+    return Object.assign({}, currentConference, {
+      options: Object.assign({}, currentConference.options, {
+        document: []
+      })
+    });
+  };
+
+  const getLocalFileUrl = async ({ id, fallbackUrl }) => {
+    if (!id) {
+      return fallbackUrl;
+    }
+    if (fastify.fileManager?.services?.getFileUrl) {
+      return await fastify.fileManager.services.getFileUrl({ id });
+    }
+    if (fastify.fileManager?.services?.fileRecord?.getFileUrl) {
+      return await fastify.fileManager.services.fileRecord.getFileUrl({ id });
+    }
+    return fallbackUrl;
+  };
+
+  const importExternalFile = async file => {
+    if (!(file?.url && /^https?:\/\//.test(file.url) && fastify.fileManager?.services?.uploadFromUrl)) {
+      return file;
+    }
+    const uploadResult = await fastify.fileManager.services.uploadFromUrl({
+      url: file.url,
+      filename: file.filename || file.name
+    });
+    const id = uploadResult?.id || uploadResult?.fileId || uploadResult;
+    const url = uploadResult?.url || (await getLocalFileUrl({ id, fallbackUrl: file.url }));
+    return Object.assign({}, file, {
+      id,
+      filename: uploadResult?.filename || file.filename || file.name,
+      url
+    });
+  };
+
+  const importConferenceOptionsFiles = async conferenceOptions => {
+    if (!conferenceOptions?.document) {
+      return conferenceOptions;
+    }
+    return Object.assign({}, conferenceOptions, {
+      document: await Promise.all(conferenceOptions.document.map(importExternalFile))
+    });
+  };
+
+  const importMemberAvatar = async member => {
+    if (!member?.avatar) {
+      return member;
+    }
+    const file = await importExternalFile({
+      url: member.avatar,
+      filename: `${member.nickname || member.name || member.email || 'member'}_avatar`
+    });
+    return Object.assign({}, member, {
+      avatar: file.url || file.id || member.avatar
+    });
+  };
+
   const isRoomNotExistError = error => {
     const errorText = [error?.message, error?.code, error?.name, typeof error?.toString === 'function' ? error.toString() : String(error)].filter(Boolean).join(' ');
     return /room\s+not\s+exist/i.test(errorText) || /room.*not.*exist/i.test(errorText);
@@ -101,6 +165,8 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('Members exceed the limit');
     }
 
+    const localConferenceOptions = await importConferenceOptionsFiles(conferenceOptions);
+
     const conference = await models.conference.create({
       name,
       startTime,
@@ -108,24 +174,28 @@ module.exports = fp(async (fastify, options) => {
       isInvitationAllowed,
       origin,
       maxCount,
-      options: conferenceOptions,
+      options: localConferenceOptions,
       userId: id
     });
 
-    const currentMembers = members.map(item =>
-      Object.assign({}, item, {
-        nickname: item.nickname || item.name,
-        conferenceId: conference.id
-      })
+    const currentMembers = await Promise.all(
+      members.map(async item =>
+        Object.assign({}, await importMemberAvatar(item), {
+          nickname: item.nickname || item.name,
+          conferenceId: conference.id
+        })
+      )
     );
     if (includingMe) {
-      currentMembers.push({
-        avatar,
-        email,
-        nickname,
-        conferenceId: conference.id,
-        isMaster: true
-      });
+      currentMembers.push(
+        await importMemberAvatar({
+          avatar,
+          email,
+          nickname,
+          conferenceId: conference.id,
+          isMaster: true
+        })
+      );
     }
 
     const memberList = await models.member.bulkCreate(currentMembers);
@@ -264,7 +334,7 @@ module.exports = fp(async (fastify, options) => {
 
     const member = id && (await getMember({ id }));
     const inviter = fromUser ? userInviter : inviterId && (await getMember({ id: inviterId }));
-    return { conference, member, inviter };
+    return { conference: getConferenceForMember(conference, authenticatePayload.isMaster), member, inviter };
   };
 
   const getConferenceDetailByShorten = async shorten => {
@@ -293,7 +363,13 @@ module.exports = fp(async (fastify, options) => {
   };
 
   const getTrtcInstanceEventsById = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
-    const conference = await getConferenceDetailById(authenticatePayload, { id });
+    const conference = await getConference({ id });
+    if (String(conference.userId) !== String(authenticatePayload.id)) {
+      const member = await getMember({ id: authenticatePayload.id, conferenceId: conference.id });
+      if (!member.isMaster) {
+        throw new Error('Only the conference creator or master can view room events');
+      }
+    }
     const query = {
       filter: { roomId: conference.id },
       perPage: Number(perPage) || 200,
@@ -479,7 +555,7 @@ module.exports = fp(async (fastify, options) => {
       {},
       {
         member,
-        conference,
+        conference: getConferenceForMember(conference, authenticatePayload.isMaster),
         sign
       }
     );
