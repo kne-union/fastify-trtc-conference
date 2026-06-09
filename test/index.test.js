@@ -608,6 +608,18 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(conference.status).to.equal(1);
     });
 
+    it('should force end expired conference during lookup and return it', async () => {
+      const { services, conferences, calls } = await createServiceContext();
+      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 60 * 60 * 1000), duration: 1, options: {} });
+      conferences.set(conference.id, conference);
+
+      const result = await services.getConference({ id: conference.id });
+
+      expect(result).to.equal(conference);
+      expect(result.status).to.equal(1);
+      expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: conference.id, options: undefined });
+    });
+
     it('should reject missing, ended or canceled conference lookups', async () => {
       const { services, conferences } = await createServiceContext();
       conferences.set('ended', createEntity({ id: 'ended', status: 1 }));
