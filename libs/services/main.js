@@ -15,6 +15,12 @@ module.exports = fp(async (fastify, options) => {
     return conference.status === 0 && isConferenceEndTimePassed(conference);
   };
 
+  const assertConferenceEndTimeValid = ({ startTime, duration }) => {
+    if (startTime && duration && !dayjs().isBefore(dayjs(startTime).add(dayjs.duration(duration, 'second')))) {
+      throw new Error('Conference end time must be in the future');
+    }
+  };
+
   const getRecordParams = record => {
     if (record === 'audio') {
       return { StreamType: 1 };
@@ -99,6 +105,14 @@ module.exports = fp(async (fastify, options) => {
     }
   };
 
+  const markConferenceEnded = async conference => {
+    if (conference.status === 1) {
+      return;
+    }
+    conference.status = 1;
+    await conference.save();
+  };
+
   const finishConference = async conference => {
     // 调用TRTC服务端API结束会议
     try {
@@ -139,13 +153,29 @@ module.exports = fp(async (fastify, options) => {
         delay: 300
       });
     }
-    conference.status = 1;
-    await conference.save();
+    await markConferenceEnded(conference);
   };
 
   const forceEndConference = async conference => {
     await stopConferenceAITranscription(conference);
     await finishConference(conference);
+  };
+
+  const forceEndExpiredConference = async conference => {
+    try {
+      await forceEndConference(conference);
+      return { success: true };
+    } catch (error) {
+      console.error('Failed to force end expired conference:', error);
+      await markConferenceEnded(conference);
+      return { success: false, error };
+    }
+  };
+
+  const forceEndExpiredConferencesForRows = async conferences => {
+    for (const conference of conferences.filter(conference => isConferenceExpired(conference))) {
+      await forceEndExpiredConference(conference);
+    }
   };
 
   const createConference = async (authenticatePayload, { includingMe, name, startTime, duration, isInvitationAllowed, origin, maxCount, options: conferenceOptions, members = [] }) => {
@@ -156,6 +186,7 @@ module.exports = fp(async (fastify, options) => {
     if (maxCount && members.length + (includingMe ? 1 : 0) > maxCount) {
       throw new Error('Members exceed the limit');
     }
+    assertConferenceEndTimeValid({ startTime, duration });
 
     const localConferenceOptions = await importConferenceOptionsFiles(conferenceOptions);
 
@@ -244,6 +275,14 @@ module.exports = fp(async (fastify, options) => {
 
   const getConferenceList = async (authenticatePayload, { perPage, currentPage }) => {
     const { id } = authenticatePayload;
+    const activeRows = await models.conference.findAll({
+      where: {
+        userId: id,
+        status: 0
+      }
+    });
+    await forceEndExpiredConferencesForRows(activeRows);
+
     const count = await models.conference.count({
       where: {
         userId: id
@@ -258,14 +297,6 @@ module.exports = fp(async (fastify, options) => {
       limit: perPage,
       order: [['startTime', 'DESC']]
     });
-
-    for (const conference of rows.filter(conference => isConferenceExpired(conference))) {
-      try {
-        await forceEndConference(conference);
-      } catch (error) {
-        console.error('Failed to force end expired conference:', error);
-      }
-    }
 
     return { pageData: rows, totalCount: count };
   };
@@ -285,7 +316,7 @@ module.exports = fp(async (fastify, options) => {
     }
 
     if (isConferenceExpired(conference)) {
-      await forceEndConference(conference);
+      await forceEndExpiredConference(conference);
     }
 
     if (status === 0 && conference.status === 1) {
@@ -770,13 +801,8 @@ module.exports = fp(async (fastify, options) => {
     const expiredConferences = rows.filter(conference => isConferenceExpired(conference));
     const results = [];
     for (const conference of expiredConferences) {
-      try {
-        await forceEndConference(conference);
-        results.push({ id: conference.id, success: true });
-      } catch (error) {
-        console.error('Failed to force end expired conference:', error);
-        results.push({ id: conference.id, success: false, error });
-      }
+      const { success, error } = await forceEndExpiredConference(conference);
+      results.push(Object.assign({ id: conference.id, success }, error ? { error } : {}));
     }
     return results;
   };
