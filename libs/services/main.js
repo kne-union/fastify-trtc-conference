@@ -280,6 +280,10 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('Conference does not exist');
     }
 
+    if (isConferenceExpired(conference)) {
+      await forceEndConference(conference);
+    }
+
     if (status === 0 && conference.status === 1) {
       throw new Error('Conference has ended');
     }
@@ -316,9 +320,6 @@ module.exports = fp(async (fastify, options) => {
   const getConferenceDetail = async authenticatePayload => {
     const { id, conferenceId, fromUser, inviterId, inviter: userInviter } = authenticatePayload;
     const conference = await getConference({ id: conferenceId });
-    if (isConferenceExpired(conference)) {
-      await forceEndConference(conference);
-    }
 
     const member = id && (await getMember({ id }));
     const inviter = fromUser ? userInviter : inviterId && (await getMember({ id: inviterId }));
