@@ -1,6 +1,6 @@
 {
   "name": "@kne/fastify-trtc-conference",
-  "version": "1.0.23-alpha.7",
+  "version": "1.0.23-alpha.8",
   "description": "基于腾讯云TRTC的Fastify视频会议插件，提供会议创建、成员管理、录像、AI转写等功能",
   "main": "index.js",
   "scripts": {

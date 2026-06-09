@@ -33,34 +33,22 @@ module.exports = fp(async (fastify, options) => {
     });
   };
 
-  const getLocalFileUrl = async ({ id, fallbackUrl }) => {
-    if (!id) {
-      return fallbackUrl;
-    }
-    if (fastify.fileManager?.services?.getFileUrl) {
-      return await fastify.fileManager.services.getFileUrl({ id });
-    }
-    if (fastify.fileManager?.services?.fileRecord?.getFileUrl) {
-      return await fastify.fileManager.services.fileRecord.getFileUrl({ id });
-    }
-    return fallbackUrl;
-  };
-
   const importExternalFile = async file => {
     if (!(file?.url && /^https?:\/\//.test(file.url) && fastify.fileManager?.services?.uploadFromUrl)) {
-      return file;
+      return {
+        id: file?.id,
+        filename: file?.filename || file?.name
+      };
     }
     const uploadResult = await fastify.fileManager.services.uploadFromUrl({
       url: file.url,
       filename: file.filename || file.name
     });
     const id = uploadResult?.id || uploadResult?.fileId || uploadResult;
-    const url = uploadResult?.url || (await getLocalFileUrl({ id, fallbackUrl: file.url }));
-    return Object.assign({}, file, {
+    return {
       id,
-      filename: uploadResult?.filename || file.filename || file.name,
-      url
-    });
+      filename: uploadResult?.filename || file.filename || file.name
+    };
   };
 
   const importConferenceOptionsFiles = async conferenceOptions => {
@@ -81,7 +69,7 @@ module.exports = fp(async (fastify, options) => {
       filename: `${member.nickname || member.name || member.email || 'member'}_avatar`
     });
     return Object.assign({}, member, {
-      avatar: file.url || file.id || member.avatar
+      avatar: file.id || member.avatar
     });
   };
 
