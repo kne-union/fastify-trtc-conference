@@ -7,8 +7,12 @@ module.exports = fp(async (fastify, options) => {
   const { models } = fastify[options.name];
   const trtc = fastify.trtc.services;
 
+  const isConferenceEndTimePassed = conference => {
+    return conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'second')));
+  };
+
   const isConferenceExpired = conference => {
-    return conference.status === 0 && conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'second')));
+    return conference.status === 0 && isConferenceEndTimePassed(conference);
   };
 
   const getRecordParams = record => {
@@ -795,6 +799,9 @@ module.exports = fp(async (fastify, options) => {
       }
     } else if (conference.userId !== authenticatePayload.id) {
       throw new Error('Only the conference creator can perform this operation');
+    }
+    if (conference.status === 1 && isConferenceEndTimePassed(conference)) {
+      return;
     }
     if (conference.startTime && !dayjs().isBefore(dayjs(conference.startTime))) {
       throw new Error('The conference has already started and cannot be canceled');

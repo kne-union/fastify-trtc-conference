@@ -759,6 +759,17 @@ describe('@kne/fastify-trtc-conference', function () {
         'The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information'
       );
     });
+
+    it('should end expired conference during cancel flow', async () => {
+      const { services, conferences, calls } = await createServiceContext();
+      const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 60 * 60 * 1000), duration: 1, options: {} });
+      conferences.set(conference.id, conference);
+
+      await services.cancelConference({ conferenceId: conference.id, isMaster: true }, { id: conference.id });
+
+      expect(conference.status).to.equal(1);
+      expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: conference.id, options: undefined });
+    });
   });
 
   describe('服务层 AI 与录像测试', () => {
