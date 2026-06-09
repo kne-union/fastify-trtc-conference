@@ -801,6 +801,24 @@ describe('@kne/fastify-trtc-conference', function () {
       });
     });
 
+    it('should allow masters but reject normal members when reading trtc instance events', async () => {
+      const { services, conferences, members } = await createServiceContext();
+      const conference = createEntity({ id: 'conference-1', userId: 'creator-1', status: 1, options: {} });
+      const master = createEntity({ id: 'master-1', conferenceId: conference.id, isMaster: true });
+      const attendee = createEntity({ id: 'attendee-1', conferenceId: conference.id, isMaster: false });
+      conferences.set(conference.id, conference);
+      members.set(master.id, master);
+      members.set(attendee.id, attendee);
+
+      const result = await services.getTrtcInstanceEventsById({ id: master.id }, { id: conference.id });
+
+      expect(result).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
+      await expectReject(
+        services.getTrtcInstanceEventsById({ id: attendee.id }, { id: conference.id }),
+        'Only the conference creator or master can view room events'
+      );
+    });
+
     it('should sync trtc instance events when list is empty', async () => {
       const { services, conferences, fastify } = await createServiceContext();
       const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 1, options: { setting: { region: 'ap-guangzhou' } } });
