@@ -502,6 +502,24 @@ describe('@kne/fastify-trtc-conference', function () {
       await expectReject(services.createConference({ id: 'user-1' }, { includingMe: true, maxCount: 1, members: [{ isMaster: false }] }), 'Members exceed the limit');
     });
 
+    it('should reject creating conferences whose end time is in the past', async () => {
+      const { services, conferences } = await createServiceContext();
+
+      await expectReject(
+        services.createConference(
+          { id: 'user-1' },
+          {
+            includingMe: true,
+            startTime: new Date(Date.now() - 60 * 60 * 1000),
+            duration: 1,
+            members: []
+          }
+        ),
+        'Conference end time must be in the future'
+      );
+      expect(conferences.size).to.equal(0);
+    });
+
     it('should save and delete conference only for owner', async () => {
       const { services, conferences } = await createServiceContext();
       const conference = await services.createConference({ id: 'user-1' }, { includingMe: true, name: 'Daily', duration: 30, maxCount: 3, members: [] });
@@ -529,6 +547,34 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(conferences.get('old').status).to.equal(1);
       expect(conferences.get('active').status).to.equal(0);
       expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: 'old', options: undefined });
+    });
+
+    it('should force end expired conferences outside the current list page', async () => {
+      const { services, conferences, calls } = await createServiceContext();
+      const activeConference = createEntity({ id: 'active', userId: 'user-1', status: 0, startTime: new Date(Date.now() + 60 * 60 * 1000), duration: 30, options: {} });
+      const oldConference = createEntity({ id: 'old', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 60 * 60 * 1000), duration: 1, options: {} });
+      conferences.set(activeConference.id, activeConference);
+      conferences.set(oldConference.id, oldConference);
+
+      const result = await services.getConferenceList({ id: 'user-1' }, { perPage: 1, currentPage: 1 });
+
+      expect(result.pageData).to.deep.equal([activeConference]);
+      expect(oldConference.status).to.equal(1);
+      expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: 'old', options: undefined });
+    });
+
+    it('should mark expired list conferences ended when cleanup fails', async () => {
+      const { fastify, services, conferences } = await createServiceContext();
+      const oldConference = createEntity({ id: 'old', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 60 * 60 * 1000), duration: 1, options: {} });
+      conferences.set(oldConference.id, oldConference);
+      fastify.trtc.services.dismiss = async () => {
+        throw new Error('TRTC service unavailable');
+      };
+
+      const result = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1 });
+
+      expect(oldConference.status).to.equal(1);
+      expect(result.pageData[0].status).to.equal(1);
     });
 
     it('should force end expired conferences with conference cleanup actions', async () => {
