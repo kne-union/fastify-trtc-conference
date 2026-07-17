@@ -365,25 +365,164 @@ module.exports = fp(async (fastify, options) => {
     return getConferenceDetail(await decodeShortenPayload(shorten));
   };
 
+  const mapRecordFileItem = item => ({
+    fileId: item.fileId || item.id,
+    filename: item.filename || item.name,
+    url: item.url
+  });
+
+  const buildConferenceRecordings = conference => {
+    const recordFiles = conference.options?.recordFiles;
+    if (!recordFiles || typeof recordFiles !== 'object') {
+      return null;
+    }
+    if (Array.isArray(recordFiles.all) && recordFiles.all.length > 0) {
+      return recordFiles.all.map(mapRecordFileItem);
+    }
+    const flat = Object.entries(recordFiles)
+      .filter(([key]) => key !== 'all')
+      .flatMap(([, files]) => (Array.isArray(files) ? files : []));
+    return flat.length > 0 ? flat.map(mapRecordFileItem) : null;
+  };
+
+  const buildTranscriptionText = (contentRecords, rounds) => {
+    const parts = [];
+    if (Array.isArray(contentRecords)) {
+      contentRecords.forEach(record => {
+        const text = typeof record === 'string' ? record : record?.text || record?.content;
+        if (text) {
+          parts.push(String(text).trim());
+        }
+      });
+    }
+    if (Array.isArray(rounds)) {
+      rounds.forEach(round => {
+        if (round?.text) {
+          parts.push(String(round.text).trim());
+        }
+      });
+    }
+    return parts.filter(Boolean).join('\n') || null;
+  };
+
+  const getTrtcTranscriptionRounds = async conference => {
+    const aiTranscription = conference.options?.aiTranscription;
+    const taskRefId = aiTranscription?.id || aiTranscription?.taskId;
+    if (!taskRefId || !fastify.trtc?.models?.task) {
+      return [];
+    }
+    const taskModel = fastify.trtc.models.task;
+    const task =
+      (await taskModel.findByPk(taskRefId)) ||
+      (await taskModel.findOne({
+        where: { taskId: String(taskRefId) }
+      }));
+    return Array.isArray(task?.result?.rounds) ? task.result.rounds : [];
+  };
+
+  const getConferenceTranscriptionData = async conference => {
+    if (!conference.options?.setting?.speech) {
+      return null;
+    }
+    const aiTranscriptionContent = await models.aiTranscriptionContent.findOne({
+      where: {
+        conferenceId: conference.id
+      }
+    });
+    const contentRecords = aiTranscriptionContent?.content || [];
+    const rounds = await getTrtcTranscriptionRounds(conference);
+    if (contentRecords.length === 0 && rounds.length === 0) {
+      return null;
+    }
+    const text = buildTranscriptionText(contentRecords, rounds);
+    return Object.assign(
+      {},
+      contentRecords.length > 0 && { content: contentRecords },
+      rounds.length > 0 && { rounds },
+      text && { text }
+    );
+  };
+
+  const enrichConferenceDetail = async conference => {
+    const json = conference.toJSON ? conference.toJSON() : conference;
+    const recordings = buildConferenceRecordings(json);
+    const transcription = await getConferenceTranscriptionData(conference);
+    return Object.assign({}, json, recordings && { recordings }, transcription && { transcription });
+  };
+
   const getConferenceDetailById = async (authenticatePayload, { id }) => {
     const { id: userId } = authenticatePayload;
     const conference = await getConference({ id });
     if (conference.userId !== userId) {
       throw new Error('Data has expired, please refresh the page and try again');
     }
-    return conference;
+    return enrichConferenceDetail(conference);
   };
 
   const getAiTranscriptionContentById = async (authenticatePayload, { id }) => {
-    const conference = await getConferenceDetailById(authenticatePayload, { id });
+    const conference = await getConference({ id });
+    if (conference.userId !== authenticatePayload.id) {
+      throw new Error('Data has expired, please refresh the page and try again');
+    }
     if (!conference.options?.setting?.speech) {
       return {};
     }
-    return await models.aiTranscriptionContent.findOne({
-      where: {
-        conferenceId: conference.id
-      }
+    const transcription = await getConferenceTranscriptionData(conference);
+    if (!transcription) {
+      return {};
+    }
+    return transcription;
+  };
+
+  const updateConferenceDuration = async (authenticatePayload, { id, duration, extendSeconds }) => {
+    await getConferenceDetailById(authenticatePayload, { id });
+    const conference = await getConference({ id, status: 0 });
+    let nextDuration = duration != null ? Number(duration) : null;
+    if (extendSeconds != null) {
+      nextDuration = Number(conference.duration || 0) + Number(extendSeconds);
+    }
+    if (!nextDuration || nextDuration <= 0 || Number.isNaN(nextDuration)) {
+      throw new Error('Invalid duration');
+    }
+    conference.duration = nextDuration;
+    await conference.save();
+    return enrichConferenceDetail(conference);
+  };
+
+  const getConferenceRoomStatusById = async (authenticatePayload, { id }) => {
+    const conference = await getConferenceDetailById(authenticatePayload, { id });
+    if (!fastify.trtc?.services?.getRoomSnapshot) {
+      throw new Error('TRTC room snapshot service is unavailable');
+    }
+    const snapshot = await fastify.trtc.services.getRoomSnapshot({ roomId: conference.id });
+    const memberMap = new Map((conference.members || []).map(item => [String(item.id), item]));
+    return Object.assign({}, snapshot, {
+      conferenceId: conference.id,
+      conferenceName: conference.name,
+      conferenceStatus: conference.status,
+      startTime: conference.startTime,
+      duration: conference.duration,
+      members: (snapshot.members || []).map(member =>
+        Object.assign({}, member, {
+          member: memberMap.get(String(member.userId)) || null
+        })
+      )
     });
+  };
+
+  const extendConferenceDurationByMember = async (authenticatePayload, { extendSeconds = 900 } = {}) => {
+    const { id, conferenceId, isMaster } = authenticatePayload;
+    if (!isMaster) {
+      throw new Error('Only the master can extend the conference');
+    }
+    const conference = await getConference({ id: conferenceId, status: 0 });
+    if (!conference.options?.allowExtend) {
+      throw new Error('Conference extension is not allowed');
+    }
+    await getMember({ id, conferenceId });
+    conference.duration = Number(conference.duration || 0) + Number(extendSeconds);
+    await conference.save();
+    return enrichConferenceDetail(conference);
   };
 
   const getTrtcInstanceEventsById = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
@@ -573,6 +712,15 @@ module.exports = fp(async (fastify, options) => {
         recordTaskId: recordTask.id
       });
       await conference.save();
+    }
+
+    if (authenticatePayload.isMaster && conference.options?.setting?.speech && !conference.options?.aiTranscription?.id) {
+      try {
+        await startAITranscription(authenticatePayload);
+        await conference.reload();
+      } catch (error) {
+        console.error('Failed to auto-start AI transcription:', error);
+      }
     }
 
     return Object.assign(
@@ -896,6 +1044,9 @@ module.exports = fp(async (fastify, options) => {
     getConferenceDetailByShorten,
     getConferenceDetailById,
     getAiTranscriptionContentById,
+    updateConferenceDuration,
+    extendConferenceDurationByMember,
+    getConferenceRoomStatusById,
     getTrtcInstanceEventsById,
     enterConference,
     saveMember,

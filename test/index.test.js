@@ -367,7 +367,10 @@ describe('@kne/fastify-trtc-conference', function () {
         'getMemberShorten',
         'inviteMemberFromUser',
         'getConferenceDetailByShorten',
-        'getConferenceDetailById'
+        'getConferenceDetailById',
+        'extendConferenceDurationByMember',
+        'updateConferenceDuration',
+        'getConferenceRoomStatusById'
       ].forEach(name => {
         services[name] = async (...args) => {
           serviceCalls.push({ name, args });
@@ -426,6 +429,7 @@ describe('@kne/fastify-trtc-conference', function () {
         '/api/conference/join': 'joinConference',
         '/api/conference/removeMember': 'removeMember',
         '/api/conference/enter': 'enterConference',
+        '/api/conference/extendDuration': 'extendConferenceDurationByMember',
         '/api/conference/startAITranscription': 'startAITranscription',
         '/api/conference/stopAITranscription': 'stopAITranscription',
         '/api/conference/recordAITranscription': 'recordAITranscription',
@@ -469,10 +473,17 @@ describe('@kne/fastify-trtc-conference', function () {
       await routes.find(route => route.url === '/api/conference/open-api/detail').handler({ openApiPayload: { id: 'open-api-user' }, query: { id: '1' } });
       await routes.find(route => route.url === '/api/conference/open-api/cancel').handler({ openApiPayload: { id: 'open-api-user' }, body: { id: '1' } });
       await routes.find(route => route.url === '/api/conference/open-api/aiTranscriptionContent').handler({ openApiPayload: { id: 'open-api-user' }, query: { id: '1' } });
+      await routes.find(route => route.url === '/api/conference/open-api/roomStatus').handler({ openApiPayload: { id: 'open-api-user' }, query: { id: '1' } });
 
       expect(health).to.deep.equal({ success: true, userInfo: { id: 'open-api-user' }, message: 'openApi服务正常' });
       expect(routes.every(route => route.config.onRequest[0] === openApiAuthenticate)).to.be.true;
-      expect(serviceCalls.map(call => call.name)).to.deep.equal(['createConference', 'getConferenceDetailById', 'cancelConference', 'getAiTranscriptionContentById']);
+      expect(serviceCalls.map(call => call.name)).to.deep.equal([
+        'createConference',
+        'getConferenceDetailById',
+        'cancelConference',
+        'getAiTranscriptionContentById',
+        'getConferenceRoomStatusById'
+      ]);
     });
   });
 

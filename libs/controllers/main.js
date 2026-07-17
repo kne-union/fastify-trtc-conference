@@ -121,6 +121,26 @@ module.exports = fp(async (fastify, options) => {
   );
 
   fastify.post(
+    `${options.prefix}/extendDuration`,
+    {
+      onRequest: [authenticate.code],
+      schema: {
+        description: '延长会议时长',
+        summary: '延长会议时长',
+        body: {
+          type: 'object',
+          properties: {
+            extendSeconds: { type: 'number' }
+          }
+        }
+      }
+    },
+    async request => {
+      return services.extendConferenceDurationByMember(request.authenticatePayload, request.body);
+    }
+  );
+
+  fastify.post(
     `${options.prefix}/startAITranscription`,
     {
       onRequest: [authenticate.code],
@@ -160,6 +180,10 @@ module.exports = fp(async (fastify, options) => {
         body: {
           type: 'object',
           properties: {
+            records: {
+              type: 'array',
+              items: { type: 'object' }
+            },
             messages: {
               type: 'array',
               items: { type: 'object', properties: { records: { type: 'array' } } }

@@ -71,6 +71,48 @@ module.exports = fp(async (fastify, options) => {
     }
   );
 
+  fastify.post(
+    `${options.prefix}/open-api/extendDuration`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: '延长会议时长',
+        body: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' },
+            duration: { type: 'number' },
+            extendSeconds: { type: 'number' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.updateConferenceDuration(request.openApiPayload, request.body);
+    }
+  );
+
+  fastify.get(
+    `${options.prefix}/open-api/roomStatus`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: '获取会议房间实时状态',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getConferenceRoomStatusById(request.openApiPayload, request.query);
+    }
+  );
+
   fastify.get(
     `${options.prefix}/open-api/aiTranscriptionContent`,
     {
