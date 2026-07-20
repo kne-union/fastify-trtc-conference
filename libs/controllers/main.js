@@ -274,7 +274,9 @@ module.exports = fp(async (fastify, options) => {
           type: 'object',
           properties: {
             perPage: { type: 'number', description: '每页数量', default: 20 },
-            currentPage: { type: 'number', description: '当前页', default: 1 }
+            currentPage: { type: 'number', description: '当前页', default: 1 },
+            keyword: { type: 'string', description: '会议名称关键字' },
+            date: { type: 'string', description: '会议开始日期，格式 YYYY-MM-DD' }
           }
         }
       }

@@ -1,6 +1,7 @@
 const fp = require('fastify-plugin');
 const dayjs = require('dayjs');
 const duration = require('dayjs/plugin/duration');
+const { Op } = require('sequelize');
 dayjs.extend(duration);
 
 module.exports = fp(async (fastify, options) => {
@@ -273,8 +274,27 @@ module.exports = fp(async (fastify, options) => {
     return {};
   };
 
-  const getConferenceList = async (authenticatePayload, { perPage, currentPage }) => {
+  const buildConferenceListWhere = (userId, { keyword, date } = {}) => {
+    const where = { userId };
+    const trimmedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
+    if (trimmedKeyword) {
+      where.name = { [Op.like]: `%${trimmedKeyword}%` };
+    }
+    if (date) {
+      const day = dayjs(date);
+      if (day.isValid()) {
+        where.startTime = {
+          [Op.gte]: day.startOf('day').toDate(),
+          [Op.lt]: day.add(1, 'day').startOf('day').toDate()
+        };
+      }
+    }
+    return where;
+  };
+
+  const getConferenceList = async (authenticatePayload, { perPage, currentPage, keyword, date }) => {
     const { id } = authenticatePayload;
+    const listWhere = buildConferenceListWhere(id, { keyword, date });
     const activeRows = await models.conference.findAll({
       where: {
         userId: id,
@@ -284,14 +304,10 @@ module.exports = fp(async (fastify, options) => {
     await forceEndExpiredConferencesForRows(activeRows);
 
     const count = await models.conference.count({
-      where: {
-        userId: id
-      }
+      where: listWhere
     });
     const rows = await models.conference.findAll({
-      where: {
-        userId: id
-      },
+      where: listWhere,
       include: models.member,
       offset: perPage * (currentPage - 1),
       limit: perPage,
