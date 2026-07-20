@@ -17,6 +17,12 @@ module.exports = ({ DataTypes }) => {
         type: DataTypes.BOOLEAN,
         comment: '是否是会议主持人'
       },
+      attended: {
+        type: DataTypes.BOOLEAN,
+        allowNull: false,
+        defaultValue: false,
+        comment: '是否参加过会议'
+      },
       shorten: {
         type: DataTypes.STRING,
         comment: '进入系统邀请码'

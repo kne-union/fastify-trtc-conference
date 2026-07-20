@@ -443,9 +443,28 @@ module.exports = fp(async (fastify, options) => {
     );
   };
 
+  const attachRecordingUrls = async recordings => {
+    if (!(Array.isArray(recordings) && fastify.fileManager?.services?.getFileUrl)) {
+      return recordings;
+    }
+    return Promise.all(
+      recordings.map(async item => {
+        if (item.url || !item.fileId) {
+          return item;
+        }
+        try {
+          const url = await fastify.fileManager.services.getFileUrl({ id: item.fileId });
+          return Object.assign({}, item, url ? { url } : {});
+        } catch (e) {
+          return item;
+        }
+      })
+    );
+  };
+
   const enrichConferenceDetail = async conference => {
     const json = conference.toJSON ? conference.toJSON() : conference;
-    const recordings = buildConferenceRecordings(json);
+    const recordings = await attachRecordingUrls(buildConferenceRecordings(json));
     const transcription = await getConferenceTranscriptionData(conference);
     return Object.assign({}, json, recordings && { recordings }, transcription && { transcription });
   };
@@ -692,6 +711,11 @@ module.exports = fp(async (fastify, options) => {
       throw new Error('The conference has ended');
     }
 
+    if (!member.attended) {
+      member.attended = true;
+      await member.save();
+    }
+
     // 注册到TRTC房间并获取用户签名
     const joinResult = await trtc.join({
       roomId: conference.id,
@@ -863,6 +887,11 @@ module.exports = fp(async (fastify, options) => {
           status: 0,
           client: event
         });
+        const enterMember = await models.member.findByPk(userId).catch(() => null);
+        if (enterMember && !enterMember.attended) {
+          enterMember.attended = true;
+          await enterMember.save();
+        }
       }
       if (eventType === 'exit') {
         userList[userId] = Object.assign({}, userList[userId], {
