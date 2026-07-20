@@ -1,5 +1,6 @@
 const path = require('node:path');
 const Module = require('node:module');
+const { Op } = require('sequelize');
 
 let expect;
 
@@ -51,6 +52,45 @@ const createMockModels = () => {
     return conference;
   };
 
+  const matchConferenceWhere = (conference, where = {}) => {
+    return Object.entries(where).every(([key, value]) => {
+      if (key === 'userId') {
+        return conference.userId === value;
+      }
+      if (key === 'status') {
+        return conference.status === value;
+      }
+      if (key === 'name' && value && value[Op.like]) {
+        const keyword = String(value[Op.like]).replace(/^%|%$/g, '');
+        return String(conference.name || '').includes(keyword);
+      }
+      if (key === 'startTime' && value && typeof value === 'object') {
+        const start = conference.startTime ? new Date(conference.startTime).getTime() : NaN;
+        if (value[Op.gte] && start < new Date(value[Op.gte]).getTime()) {
+          return false;
+        }
+        if (value[Op.lt] && start >= new Date(value[Op.lt]).getTime()) {
+          return false;
+        }
+        return true;
+      }
+      return conference[key] === value;
+    });
+  };
+
+  const filterConferences = ({ where, offset = 0, limit = Infinity, order }) => {
+    let rows = Array.from(conferences.values()).filter(conference => matchConferenceWhere(conference, where));
+    if (order?.[0]?.[0] === 'startTime') {
+      const direction = order[0][1] === 'DESC' ? -1 : 1;
+      rows = rows.sort((a, b) => {
+        const aTime = a.startTime ? new Date(a.startTime).getTime() : 0;
+        const bTime = b.startTime ? new Date(b.startTime).getTime() : 0;
+        return (aTime - bTime) * direction;
+      });
+    }
+    return rows.slice(offset, offset + limit).map(attachMembers);
+  };
+
   const models = {
     conference: {
       async create(data) {
@@ -62,13 +102,10 @@ const createMockModels = () => {
         return attachMembers(conferences.get(String(id)));
       },
       async count({ where }) {
-        return Array.from(conferences.values()).filter(conference => conference.userId === where.userId).length;
+        return Array.from(conferences.values()).filter(conference => matchConferenceWhere(conference, where)).length;
       },
-      async findAll({ where, offset = 0, limit = Infinity }) {
-        return Array.from(conferences.values())
-          .filter(conference => (where.userId === undefined || conference.userId === where.userId) && (where.status === undefined || conference.status === where.status))
-          .slice(offset, offset + limit)
-          .map(attachMembers);
+      async findAll({ where, offset = 0, limit = Infinity, order }) {
+        return filterConferences({ where, offset, limit, order });
       },
       async update(data, { where }) {
         where.id.forEach(id => Object.assign(conferences.get(String(id)), data));
@@ -586,6 +623,61 @@ describe('@kne/fastify-trtc-conference', function () {
 
       expect(oldConference.status).to.equal(1);
       expect(result.pageData[0].status).to.equal(1);
+    });
+
+    it('should filter conference list by keyword and date', async () => {
+      const { services, conferences } = await createServiceContext();
+      conferences.set(
+        'match',
+        createEntity({
+          id: 'match',
+          userId: 'user-1',
+          name: '产品需求评审',
+          status: 0,
+          startTime: new Date('2026-06-05T10:00:00.000Z'),
+          duration: 30,
+          options: {}
+        })
+      );
+      conferences.set(
+        'other-name',
+        createEntity({
+          id: 'other-name',
+          userId: 'user-1',
+          name: '技术架构讨论',
+          status: 0,
+          startTime: new Date('2026-06-05T14:00:00.000Z'),
+          duration: 30,
+          options: {}
+        })
+      );
+      conferences.set(
+        'other-date',
+        createEntity({
+          id: 'other-date',
+          userId: 'user-1',
+          name: '产品需求评审复盘',
+          status: 0,
+          startTime: new Date('2026-06-06T10:00:00.000Z'),
+          duration: 30,
+          options: {}
+        })
+      );
+
+      const keywordResult = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1, keyword: '产品' });
+      expect(keywordResult.totalCount).to.equal(2);
+      expect(keywordResult.pageData.map(item => item.id)).to.deep.equal(['other-date', 'match']);
+
+      const dateResult = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1, date: '2026-06-05' });
+      expect(dateResult.totalCount).to.equal(2);
+      expect(dateResult.pageData.map(item => item.id)).to.deep.equal(['other-name', 'match']);
+
+      const combinedResult = await services.getConferenceList(
+        { id: 'user-1' },
+        { perPage: 20, currentPage: 1, keyword: '产品', date: '2026-06-05' }
+      );
+      expect(combinedResult.totalCount).to.equal(1);
+      expect(combinedResult.pageData[0].id).to.equal('match');
     });
 
     it('should force end expired conferences with conference cleanup actions', async () => {

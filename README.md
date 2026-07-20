@@ -412,7 +412,7 @@ options 子项：
 | `createConference(authenticatePayload, { name, startTime, duration, isInvitationAllowed, origin, maxCount, options, members })` | 创建会议                       |
 | `saveConference(authenticatePayload, { id, name, duration, isInvitationAllowed, maxCount, options })`                           | 修改会议                       |
 | `deleteConference(authenticatePayload, { id })`                                                                                 | 删除会议                       |
-| `getConferenceList(authenticatePayload, { perPage, currentPage })`                                                              | 获取会议列表                   |
+| `getConferenceList(authenticatePayload, { perPage, currentPage, keyword, date })`                                                              | 获取会议列表                   |
 | `getConferenceDetail(authenticatePayload)`                                                                                      | 获取会议详情（含成员和邀请人） |
 | `getConferenceDetailById(authenticatePayload, { id })`                                                                          | 按 ID 获取会议详情             |
 | `getAiTranscriptionContentById(authenticatePayload, { id })`                                                                    | 获取AI转写内容                 |
