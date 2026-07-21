@@ -566,14 +566,7 @@ module.exports = fp(async (fastify, options) => {
     return enrichConferenceDetail(conference);
   };
 
-  const getTrtcInstanceEventsById = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
-    const conference = await getConference({ id });
-    if (String(conference.userId) !== String(authenticatePayload.id)) {
-      const member = await getMember({ id: authenticatePayload.id, conferenceId: conference.id });
-      if (!member.isMaster) {
-        throw new Error('Only the conference creator or master can view room events');
-      }
-    }
+  const listTrtcInstanceEvents = async (authenticatePayload, conference, { perPage = 200, currentPage = 1 } = {}) => {
     const query = {
       filter: { roomId: conference.id },
       perPage: Number(perPage) || 200,
@@ -593,6 +586,33 @@ module.exports = fp(async (fastify, options) => {
       result = await fastify.trtc.services.instanceEvent.list(authenticatePayload, query);
     }
     return result;
+  };
+
+  const getTrtcInstanceEventsById = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
+    const conference = await getConference({ id });
+    if (String(conference.userId) !== String(authenticatePayload.id)) {
+      const member = await getMember({ id: authenticatePayload.id, conferenceId: conference.id });
+      if (!member.isMaster) {
+        throw new Error('Only the conference creator or master can view room events');
+      }
+    }
+    return listTrtcInstanceEvents(authenticatePayload, conference, { perPage, currentPage });
+  };
+
+  const getTrtcInstanceEventsForOpenApi = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
+    const conference = await getConference({ id });
+    if (conference.userId !== authenticatePayload.id) {
+      throw new Error('Data has expired, please refresh the page and try again');
+    }
+    const result = await listTrtcInstanceEvents(authenticatePayload, conference, { perPage, currentPage });
+    return Object.assign({}, result, {
+      conferenceId: conference.id,
+      conferenceName: conference.name,
+      conferenceStatus: conference.status,
+      startTime: conference.startTime,
+      duration: conference.duration,
+      members: conference.members || []
+    });
   };
 
   const saveMember = async (authenticatePayload, data) => {
@@ -1099,6 +1119,7 @@ module.exports = fp(async (fastify, options) => {
     extendConferenceDurationByMember,
     getConferenceRoomStatusById,
     getTrtcInstanceEventsById,
+    getTrtcInstanceEventsForOpenApi,
     enterConference,
     saveMember,
     inviteMember,
