@@ -132,6 +132,19 @@ const createMockModels = () => {
           return null;
         }
         return member;
+      },
+      async findOne({ where } = {}) {
+        return (
+          Array.from(members.values()).find(member => {
+            if (where?.id != null && String(member.id) !== String(where.id)) {
+              return false;
+            }
+            if (where?.conferenceId != null && String(member.conferenceId) !== String(where.conferenceId)) {
+              return false;
+            }
+            return true;
+          }) || null
+        );
       }
     },
     aiTranscriptionContent: {
@@ -905,7 +918,7 @@ describe('@kne/fastify-trtc-conference', function () {
       );
     });
 
-    it('should cancel future conferences only by master or creator', async () => {
+    it('should cancel conferences only by master or creator', async () => {
       const { services, conferences } = await createServiceContext();
       const conference = createEntity({ id: 'conference-1', userId: 'user-1', status: 0, startTime: new Date(Date.now() + 60 * 1000), options: {} });
       conferences.set(conference.id, conference);
@@ -925,13 +938,50 @@ describe('@kne/fastify-trtc-conference', function () {
       conference.status = 0;
       await expectReject(services.cancelConference({ id: 'user-2' }, { id: conference.id }), 'Only the conference creator can perform this operation');
 
-      conference.startTime = new Date(Date.now() - 60 * 1000);
-      await expectReject(services.cancelConference({ conferenceId: conference.id, isMaster: true }, { id: conference.id }), 'The conference has already started and cannot be canceled');
       await expectReject(services.cancelConference({ conferenceId: conference.id, isMaster: false }, { id: conference.id }), 'Only the master can cancel the conference');
       await expectReject(
         services.cancelConference({ conferenceId: conference.id, isMaster: true }, { id: 'another' }),
         'The current conference is invalid, possibly because multiple conferences were opened simultaneously. Please refresh the page to get the latest conference information'
       );
+    });
+
+    it('should cancel a started conference and stop active resources', async () => {
+      const { services, conferences, calls } = await createServiceContext();
+      const conference = createEntity({
+        id: 'conference-1',
+        name: 'Started Meeting',
+        userId: 'user-1',
+        status: 0,
+        startTime: new Date(Date.now() - 60 * 1000),
+        duration: 60 * 60,
+        options: {
+          setting: { record: true, speech: true },
+          recordTaskId: 'record-task-id',
+          aiTranscription: { id: 'ai-task-id' }
+        }
+      });
+      conferences.set(conference.id, conference);
+
+      await services.cancelConference({ conferenceId: conference.id, isMaster: true }, { id: conference.id });
+
+      expect(conference.status).to.equal(2);
+      expect(calls.trtc.stopAITranscriptions[0]).to.deep.equal({
+        id: 'ai-task-id',
+        roomId: conference.id,
+        options: conference.options.setting
+      });
+      expect(calls.trtc.dismisses[0]).to.deep.equal({ roomId: conference.id, options: conference.options.setting });
+      expect(calls.trtc.stopRecords[0]).to.deep.equal({
+        id: 'record-task-id',
+        roomId: conference.id,
+        options: conference.options.setting
+      });
+      expect(calls.taskCreates[0]).to.include({
+        type: 'record-video',
+        targetId: conference.id,
+        targetType: 'conference',
+        targetName: 'Started Meeting'
+      });
     });
 
     it('should end expired conference during cancel flow', async () => {
@@ -1001,17 +1051,29 @@ describe('@kne/fastify-trtc-conference', function () {
     it('should allow masters but reject normal members when reading trtc instance events', async () => {
       const { services, conferences, members } = await createServiceContext();
       const conference = createEntity({ id: 'conference-1', userId: 'creator-1', status: 1, options: {} });
-      const master = createEntity({ id: 'master-1', conferenceId: conference.id, isMaster: true });
-      const attendee = createEntity({ id: 'attendee-1', conferenceId: conference.id, isMaster: false });
+      const master = createEntity({ id: 'master-1', conferenceId: conference.id, isMaster: true, email: 'master@test.com' });
+      const attendee = createEntity({ id: 'attendee-1', conferenceId: conference.id, isMaster: false, email: 'attendee@test.com' });
       conferences.set(conference.id, conference);
       members.set(master.id, master);
       members.set(attendee.id, attendee);
 
-      const result = await services.getTrtcInstanceEventsById({ id: master.id }, { id: conference.id });
+      // 兼容：payload.id 直接为成员 id
+      const resultByMemberId = await services.getTrtcInstanceEventsById({ id: master.id }, { id: conference.id });
+      expect(resultByMemberId).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
 
-      expect(result).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
+      // userAuthenticate 真实场景：payload.id 是账号 id，通过邮箱匹配主持人
+      const resultByEmail = await services.getTrtcInstanceEventsById(
+        { id: 'account-master', email: 'master@test.com' },
+        { id: conference.id }
+      );
+      expect(resultByEmail).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
+
       await expectReject(
-        services.getTrtcInstanceEventsById({ id: attendee.id }, { id: conference.id }),
+        services.getTrtcInstanceEventsById({ id: 'account-attendee', email: 'attendee@test.com' }, { id: conference.id }),
+        'Only the conference creator or master can view room events'
+      );
+      await expectReject(
+        services.getTrtcInstanceEventsById({ id: 'unknown-user' }, { id: conference.id }),
         'Only the conference creator or master can view room events'
       );
     });
