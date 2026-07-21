@@ -86,7 +86,8 @@ module.exports = fp(async (fastify, options) => {
 
   const isRoomNotExistError = error => {
     const errorText = [error?.message, error?.code, error?.name, typeof error?.toString === 'function' ? error.toString() : String(error)].filter(Boolean).join(' ');
-    return /room\s+not\s+exist/i.test(errorText) || /room.*not.*exist/i.test(errorText);
+    // fastify-trtc 在房间无 instanceCase 记录时抛中文错误「房间不存在」
+    return /room\s+not\s+exist/i.test(errorText) || /room.*not.*exist/i.test(errorText) || /房间不存在/.test(errorText);
   };
 
   const stopConferenceAITranscription = async conference => {

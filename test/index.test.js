@@ -768,6 +768,26 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(expiredConference.status).to.equal(1);
     });
 
+    it('should cancel a started conference when trtc room does not exist', async () => {
+      const { fastify, services, conferences } = await createServiceContext();
+      const conference = createEntity({
+        id: 'conference-1',
+        userId: 'user-1',
+        status: 0,
+        startTime: new Date(Date.now() - 10 * 60 * 1000),
+        duration: 60 * 60,
+        options: {}
+      });
+      conferences.set(conference.id, conference);
+      fastify.trtc.services.dismiss = async () => {
+        throw new Error('房间不存在');
+      };
+
+      await services.cancelConference({ id: 'user-1' }, { id: conference.id });
+
+      expect(conference.status).to.equal(2);
+    });
+
     it('should use seconds when checking conference expiration', async () => {
       const { services, conferences } = await createServiceContext();
       const notExpired = createEntity({ id: 'not-expired', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 30 * 1000), duration: 60, options: {} });
