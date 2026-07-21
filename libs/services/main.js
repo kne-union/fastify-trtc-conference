@@ -274,7 +274,7 @@ module.exports = fp(async (fastify, options) => {
     return {};
   };
 
-  const buildConferenceListWhere = (userId, { keyword, date } = {}) => {
+  const buildConferenceListWhere = (userId, { keyword, date, record, speech } = {}) => {
     const where = { userId };
     const trimmedKeyword = typeof keyword === 'string' ? keyword.trim() : '';
     if (trimmedKeyword) {
@@ -289,12 +289,18 @@ module.exports = fp(async (fastify, options) => {
         };
       }
     }
+    if (record === 'audio' || record === 'video') {
+      where['options.setting.record'] = record;
+    }
+    if (typeof speech === 'boolean') {
+      where['options.setting.speech'] = speech;
+    }
     return where;
   };
 
-  const getConferenceList = async (authenticatePayload, { perPage, currentPage, keyword, date }) => {
+  const getConferenceList = async (authenticatePayload, { perPage, currentPage, keyword, date, record, speech }) => {
     const { id } = authenticatePayload;
-    const listWhere = buildConferenceListWhere(id, { keyword, date });
+    const listWhere = buildConferenceListWhere(id, { keyword, date, record, speech });
     const activeRows = await models.conference.findAll({
       where: {
         userId: id,

@@ -74,6 +74,12 @@ const createMockModels = () => {
         }
         return true;
       }
+      if (key === 'options.setting.record') {
+        return conference.options?.setting?.record === value;
+      }
+      if (key === 'options.setting.speech') {
+        return conference.options?.setting?.speech === value;
+      }
       return conference[key] === value;
     });
   };
@@ -443,11 +449,15 @@ describe('@kne/fastify-trtc-conference', function () {
       await detailRoute.handler({ query: { code: 'invite-code' }, headers: {} });
       await routes.find(route => route.url === '/api/conference/saveMember').handler({ authenticatePayload: { id: '1' }, body: { nickname: 'New' } });
       await routes.find(route => route.url === '/api/conference/create').handler({ userInfo: { id: 'user-1' }, body: { name: 'Daily' } });
-      await routes.find(route => route.url === '/api/conference/list').handler({ authenticatePayload: { id: 'user-1' }, query: { perPage: 20, currentPage: 1 } });
+      const listRoute = routes.find(route => route.url === '/api/conference/list');
+      await listRoute.handler({ authenticatePayload: { id: 'user-1' }, query: { perPage: 20, currentPage: 1, record: 'video', speech: true } });
 
-      expect(routes.find(route => route.url === '/api/conference/list').config.onRequest[0]).to.equal(userAuthenticate);
+      expect(listRoute.config.onRequest[0]).to.equal(userAuthenticate);
+      expect(listRoute.config.schema.query.properties.record.enum).to.deep.equal(['audio', 'video']);
+      expect(listRoute.config.schema.query.properties.speech.type).to.equal('boolean');
       expect(serviceCalls.map(call => call.name)).to.deep.equal(['getConferenceDetailByShorten', 'saveMember', 'createConference', 'getConferenceList']);
       expect(serviceCalls[0].args).to.deep.equal(['invite-code']);
+      expect(serviceCalls[3].args[1]).to.include({ record: 'video', speech: true });
     });
 
     it('should forward every user route to the expected service', async () => {
@@ -625,7 +635,7 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(result.pageData[0].status).to.equal(1);
     });
 
-    it('should filter conference list by keyword and date', async () => {
+    it('should filter conference list by keyword, date, recording and speech recognition', async () => {
       const { services, conferences } = await createServiceContext();
       conferences.set(
         'match',
@@ -636,7 +646,7 @@ describe('@kne/fastify-trtc-conference', function () {
           status: 0,
           startTime: new Date('2026-06-05T10:00:00.000Z'),
           duration: 30,
-          options: {}
+          options: { setting: { record: 'video', speech: true } }
         })
       );
       conferences.set(
@@ -648,7 +658,7 @@ describe('@kne/fastify-trtc-conference', function () {
           status: 0,
           startTime: new Date('2026-06-05T14:00:00.000Z'),
           duration: 30,
-          options: {}
+          options: { setting: { record: 'audio', speech: false } }
         })
       );
       conferences.set(
@@ -660,7 +670,7 @@ describe('@kne/fastify-trtc-conference', function () {
           status: 0,
           startTime: new Date('2026-06-06T10:00:00.000Z'),
           duration: 30,
-          options: {}
+          options: { setting: { record: 'video', speech: false } }
         })
       );
 
@@ -678,6 +688,21 @@ describe('@kne/fastify-trtc-conference', function () {
       );
       expect(combinedResult.totalCount).to.equal(1);
       expect(combinedResult.pageData[0].id).to.equal('match');
+
+      const recordResult = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1, record: 'video' });
+      expect(recordResult.totalCount).to.equal(2);
+      expect(recordResult.pageData.map(item => item.id)).to.deep.equal(['other-date', 'match']);
+
+      const speechResult = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1, speech: false });
+      expect(speechResult.totalCount).to.equal(2);
+      expect(speechResult.pageData.map(item => item.id)).to.deep.equal(['other-date', 'other-name']);
+
+      const settingResult = await services.getConferenceList(
+        { id: 'user-1' },
+        { perPage: 20, currentPage: 1, record: 'video', speech: true }
+      );
+      expect(settingResult.totalCount).to.equal(1);
+      expect(settingResult.pageData[0].id).to.equal('match');
     });
 
     it('should force end expired conferences with conference cleanup actions', async () => {
