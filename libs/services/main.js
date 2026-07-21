@@ -106,15 +106,15 @@ module.exports = fp(async (fastify, options) => {
     }
   };
 
-  const markConferenceEnded = async conference => {
-    if (conference.status === 1) {
+  const markConferenceFinished = async (conference, status = 1) => {
+    if (conference.status === status) {
       return;
     }
-    conference.status = 1;
+    conference.status = status;
     await conference.save();
   };
 
-  const finishConference = async conference => {
+  const finishConference = async (conference, status = 1) => {
     // 调用TRTC服务端API结束会议
     try {
       await trtc.dismiss({
@@ -154,12 +154,12 @@ module.exports = fp(async (fastify, options) => {
         delay: 300
       });
     }
-    await markConferenceEnded(conference);
+    await markConferenceFinished(conference, status);
   };
 
-  const forceEndConference = async conference => {
+  const forceEndConference = async (conference, status = 1) => {
     await stopConferenceAITranscription(conference);
-    await finishConference(conference);
+    await finishConference(conference, status);
   };
 
   const forceEndExpiredConference = async conference => {
@@ -168,7 +168,7 @@ module.exports = fp(async (fastify, options) => {
       return { success: true };
     } catch (error) {
       console.error('Failed to force end expired conference:', error);
-      await markConferenceEnded(conference);
+      await markConferenceFinished(conference);
       return { success: false, error };
     }
   };
@@ -357,13 +357,35 @@ module.exports = fp(async (fastify, options) => {
     if (!memberId) {
       throw new Error('Member not found');
     }
-    const member = await models.member.findByPk(memberId, {
-      where: Object.assign({}, conferenceId ? { conferenceId } : {})
-    });
+    // findByPk 会覆盖 options.where，带 conferenceId 时必须用 findOne
+    const member = conferenceId
+      ? await models.member.findOne({ where: { id: memberId, conferenceId } })
+      : await models.member.findByPk(memberId);
     if (!member) {
       throw new Error('Member not found');
     }
     return member;
+  };
+
+  const isConferenceMasterUser = (conference, authenticatePayload) => {
+    if (!authenticatePayload) {
+      return false;
+    }
+    if (String(conference.userId) === String(authenticatePayload.id)) {
+      return true;
+    }
+    const payloadEmail = authenticatePayload.email && String(authenticatePayload.email).toLowerCase();
+    return (conference.members || []).some(member => {
+      if (!member?.isMaster) {
+        return false;
+      }
+      // 兼容历史调用：payload.id 直接传成员 id
+      if (String(member.id) === String(authenticatePayload.id)) {
+        return true;
+      }
+      // userAuthenticate 场景：用账号邮箱匹配主持人成员
+      return !!(payloadEmail && member.email && String(member.email).toLowerCase() === payloadEmail);
+    });
   };
 
   const decodeShortenPayload = async shorten => {
@@ -590,11 +612,10 @@ module.exports = fp(async (fastify, options) => {
 
   const getTrtcInstanceEventsById = async (authenticatePayload, { id, perPage = 200, currentPage = 1 }) => {
     const conference = await getConference({ id });
-    if (String(conference.userId) !== String(authenticatePayload.id)) {
-      const member = await getMember({ id: authenticatePayload.id, conferenceId: conference.id });
-      if (!member.isMaster) {
-        throw new Error('Only the conference creator or master can view room events');
-      }
+    // 本接口走 userAuthenticate，payload.id 是账号 userId，不是 member 主键；
+    // 此前用 getMember({ id: userId }) 会误报 Member not found
+    if (!isConferenceMasterUser(conference, authenticatePayload)) {
+      throw new Error('Only the conference creator or master can view room events');
     }
     return listTrtcInstanceEvents(authenticatePayload, conference, { perPage, currentPage });
   };
@@ -1048,8 +1069,9 @@ module.exports = fp(async (fastify, options) => {
     if (conference.status === 1 && isConferenceEndTimePassed(conference)) {
       return;
     }
-    if (conference.startTime && !dayjs().isBefore(dayjs(conference.startTime))) {
-      throw new Error('The conference has already started and cannot be canceled');
+    if (conference.status === 0 && conference.startTime && !dayjs().isBefore(dayjs(conference.startTime))) {
+      await forceEndConference(conference, 2);
+      return;
     }
     conference.status = 2;
     await conference.save();

@@ -325,7 +325,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.getTrtcInstanceEventsById(request.authenticatePayload, request.query);
+      return services.getTrtcInstanceEventsById(options.getUserInfo(request), request.query);
     }
   );
 
