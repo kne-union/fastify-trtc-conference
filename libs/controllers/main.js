@@ -329,6 +329,26 @@ module.exports = fp(async (fastify, options) => {
     }
   );
 
+  fastify.get(
+    `${options.prefix}/getTrtcRoomEventsSummary`,
+    {
+      onRequest: [userAuthenticate],
+      schema: {
+        summary: '获取会议TRTC房间事件聚合摘要',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getTrtcRoomEventsSummaryById(options.getUserInfo(request), request.query);
+    }
+  );
+
   fastify.post(
     `${options.prefix}/create`,
     {

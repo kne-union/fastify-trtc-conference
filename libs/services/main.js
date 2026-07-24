@@ -2,6 +2,7 @@ const fp = require('fastify-plugin');
 const dayjs = require('dayjs');
 const duration = require('dayjs/plugin/duration');
 const { Op } = require('sequelize');
+const { buildRoomEventsSummary } = require('./build-room-events-summary');
 dayjs.extend(duration);
 
 module.exports = fp(async (fastify, options) => {
@@ -637,6 +638,39 @@ module.exports = fp(async (fastify, options) => {
     });
   };
 
+  const buildConferenceRoomEventsSummary = async conference => {
+    return buildRoomEventsSummary({
+      conference,
+      instanceCaseModel: fastify.trtc.models?.instanceCase,
+      instanceEventModel: fastify.trtc.models?.instanceEvent,
+      syncRoomUserEvents: fastify.trtc.services?.syncRoomUserEvents
+    });
+  };
+
+  const getTrtcRoomEventsSummaryById = async (authenticatePayload, { id }) => {
+    const conference = await getConference({ id });
+    if (!isConferenceMasterUser(conference, authenticatePayload)) {
+      throw new Error('Only the conference creator or master can view room events');
+    }
+    return buildConferenceRoomEventsSummary(conference);
+  };
+
+  const getTrtcRoomEventsSummaryForOpenApi = async (authenticatePayload, { id }) => {
+    const conference = await getConference({ id });
+    if (conference.userId !== authenticatePayload.id) {
+      throw new Error('Data has expired, please refresh the page and try again');
+    }
+    const result = await buildConferenceRoomEventsSummary(conference);
+    return Object.assign({}, result, {
+      conferenceId: conference.id,
+      conferenceName: conference.name,
+      conferenceStatus: conference.status,
+      startTime: conference.startTime,
+      duration: conference.duration,
+      conferenceMembers: conference.members || []
+    });
+  };
+
   const saveMember = async (authenticatePayload, data) => {
     const { id } = authenticatePayload;
     const member = await getMember({ id });
@@ -1143,6 +1177,8 @@ module.exports = fp(async (fastify, options) => {
     getConferenceRoomStatusById,
     getTrtcInstanceEventsById,
     getTrtcInstanceEventsForOpenApi,
+    getTrtcRoomEventsSummaryById,
+    getTrtcRoomEventsSummaryForOpenApi,
     enterConference,
     saveMember,
     inviteMember,

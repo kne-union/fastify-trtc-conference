@@ -229,6 +229,7 @@ await fetch('/api/conference/create', {
 | ---- | ------------------------------------------- | ------------------ |
 | GET  | `/api/conference/list`                      | 获取会议列表       |
 | GET  | `/api/conference/getAiTranscriptionContent` | 获取会议AI转写内容 |
+| GET  | `/api/conference/getTrtcRoomEventsSummary`  | 获取房间事件聚合摘要 |
 | POST | `/api/conference/create`                    | 创建会议           |
 | POST | `/api/conference/save`                      | 修改会议           |
 | POST | `/api/conference/delete`                    | 删除会议           |
@@ -260,6 +261,7 @@ await fetch('/api/conference/create', {
 | GET  | `/api/conference/open-api/detail`                 | 获取会议信息   |
 | POST | `/api/conference/open-api/cancel`                 | 取消会议       |
 | GET  | `/api/conference/open-api/aiTranscriptionContent` | 获取AI转写内容 |
+| GET  | `/api/conference/open-api/roomEventsSummary`      | 获取房间事件聚合摘要 |
 
 #### 接口详情
 
@@ -416,6 +418,8 @@ options 子项：
 | `getConferenceDetail(authenticatePayload)`                                                                                      | 获取会议详情（含成员和邀请人） |
 | `getConferenceDetailById(authenticatePayload, { id })`                                                                          | 按 ID 获取会议详情             |
 | `getAiTranscriptionContentById(authenticatePayload, { id })`                                                                    | 获取AI转写内容                 |
+| `getTrtcRoomEventsSummaryById(authenticatePayload, { id })`                                                                     | 获取房间事件聚合摘要（用户态）     |
+| `getTrtcRoomEventsSummaryForOpenApi(authenticatePayload, { id })`                                                               | 获取房间事件聚合摘要（OpenAPI）   |
 | `enterConference(authenticatePayload)`                                                                                          | 进入会议（获取 TRTC 签名）     |
 | `saveMember(authenticatePayload, data)`                                                                                         | 修改参会人信息                 |
 | `inviteMember(authenticatePayload)`                                                                                             | 主持人邀请参会人               |

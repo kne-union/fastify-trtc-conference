@@ -417,6 +417,8 @@ describe('@kne/fastify-trtc-conference', function () {
         'getConferenceList',
         'getAiTranscriptionContentById',
         'getTrtcInstanceEventsById',
+        'getTrtcRoomEventsSummaryById',
+        'getTrtcRoomEventsSummaryForOpenApi',
         'createConference',
         'saveConference',
         'deleteConference',
@@ -499,6 +501,7 @@ describe('@kne/fastify-trtc-conference', function () {
         '/api/conference/list': 'getConferenceList',
         '/api/conference/getAiTranscriptionContent': 'getAiTranscriptionContentById',
         '/api/conference/getTrtcInstanceEvents': 'getTrtcInstanceEventsById',
+        '/api/conference/getTrtcRoomEventsSummary': 'getTrtcRoomEventsSummaryById',
         '/api/conference/create': 'createConference',
         '/api/conference/save': 'saveConference',
         '/api/conference/delete': 'deleteConference',
@@ -534,6 +537,7 @@ describe('@kne/fastify-trtc-conference', function () {
       await routes.find(route => route.url === '/api/conference/open-api/cancel').handler({ openApiPayload: { id: 'open-api-user' }, body: { id: '1' } });
       await routes.find(route => route.url === '/api/conference/open-api/aiTranscriptionContent').handler({ openApiPayload: { id: 'open-api-user' }, query: { id: '1' } });
       await routes.find(route => route.url === '/api/conference/open-api/roomStatus').handler({ openApiPayload: { id: 'open-api-user' }, query: { id: '1' } });
+      await routes.find(route => route.url === '/api/conference/open-api/roomEventsSummary').handler({ openApiPayload: { id: 'open-api-user' }, query: { id: '1' } });
 
       expect(health).to.deep.equal({ success: true, userInfo: { id: 'open-api-user' }, message: 'openApi服务正常' });
       expect(routes.every(route => route.config.onRequest[0] === openApiAuthenticate)).to.be.true;
@@ -542,7 +546,8 @@ describe('@kne/fastify-trtc-conference', function () {
         'getConferenceDetailById',
         'cancelConference',
         'getAiTranscriptionContentById',
-        'getConferenceRoomStatusById'
+        'getConferenceRoomStatusById',
+        'getTrtcRoomEventsSummaryForOpenApi'
       ]);
     });
   });
@@ -1126,6 +1131,118 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(result).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
       expect(listCount).to.equal(2);
       expect(syncCalls).to.deep.equal([{ instanceCase, options: conference.options.setting }]);
+    });
+
+    it('should build trtc room events summary without raw high-frequency events', async () => {
+      const { services, conferences, members, fastify } = await createServiceContext();
+      const conference = createEntity({
+        id: 'conference-1',
+        userId: 'user-1',
+        status: 1,
+        name: 'Daily',
+        startTime: '2024-01-15T10:00:00.000Z',
+        duration: 1800,
+        options: {},
+        members: []
+      });
+      const member = createEntity({ id: 'member-1', conferenceId: conference.id, isMaster: true, nickname: 'Owner' });
+      conference.members = [member];
+      conferences.set(conference.id, conference);
+      members.set(member.id, member);
+
+      const instanceEvents = [
+        {
+          id: 'e1',
+          code: 'Client.enter',
+          time: '2024-01-15T10:00:00.000Z',
+          payload: { reporterId: 'member-1', userId: 'member-1', eventType: 'enter' }
+        },
+        {
+          id: 'e2',
+          code: 'Client.network-quality',
+          time: '2024-01-15T10:00:10.000Z',
+          payload: {
+            reporterId: 'member-1',
+            userId: 'member-1',
+            event: { data: { uplinkNetworkQuality: 1, downlinkNetworkQuality: 2 } }
+          }
+        },
+        {
+          id: 'e3',
+          code: 'Client.statistics',
+          time: '2024-01-15T10:00:20.000Z',
+          payload: {
+            reporterId: 'member-1',
+            userId: 'member-1',
+            event: {
+              data: {
+                rtt: 40,
+                upLoss: 0,
+                downLoss: 0,
+                localStatistics: { audio: { bitrate: 32, audioLevel: 0.08 }, video: { 0: { bitrate: 800, frameRate: 24 } } }
+              }
+            }
+          }
+        },
+        {
+          id: 'e4',
+          code: 'Client.exit',
+          time: '2024-01-15T10:30:00.000Z',
+          payload: { reporterId: 'member-1', userId: 'member-1', eventType: 'exit' }
+        }
+      ];
+
+      // pad network-quality samples for downsampling coverage
+      for (let i = 0; i < 40; i += 1) {
+        instanceEvents.splice(2, 0, {
+          id: `nq-${i}`,
+          code: 'Client.network-quality',
+          time: new Date(Date.parse('2024-01-15T10:00:10.000Z') + i * 1000).toISOString(),
+          payload: {
+            reporterId: 'member-1',
+            userId: 'member-1',
+            event: { data: { uplinkNetworkQuality: 1, downlinkNetworkQuality: 1 } }
+          }
+        });
+      }
+
+      fastify.trtc.models = {
+        instanceCase: {
+          async findOne() {
+            return { id: 'case-1', roomId: conference.id };
+          }
+        },
+        instanceEvent: {
+          async findAll({ offset = 0, limit = 1000 }) {
+            return instanceEvents.slice(offset, offset + limit);
+          }
+        }
+      };
+
+      const result = await services.getTrtcRoomEventsSummaryById({ id: 'user-1' }, { id: conference.id });
+      expect(result.overview.actualStart).to.equal('2024-01-15T10:00:00.000Z');
+      expect(result.overview.actualEnd).to.equal('2024-01-15T10:30:00.000Z');
+      expect(result.summary.memberCount).to.equal(1);
+      expect(result.members).to.have.length(1);
+      expect(result.members[0].charts.networkQuality.labels.length).to.be.at.most(300);
+      expect(result.members[0].timeline.map(item => item.code)).to.deep.equal(['Client.enter', 'Client.exit']);
+      expect(result.members[0].timeline.some(item => item.code === 'Client.network-quality')).to.equal(false);
+      expect(result.members[0].charts.networkQuality.series[0].key).to.equal('uplinkNetworkQuality');
+
+      const openApiResult = await services.getTrtcRoomEventsSummaryForOpenApi({ id: 'user-1' }, { id: conference.id });
+      expect(openApiResult.conferenceId).to.equal(conference.id);
+      expect(openApiResult.conferenceName).to.equal('Daily');
+      expect(openApiResult.conferenceMembers).to.deep.equal(conference.members);
+      expect(openApiResult.members[0].userId).to.equal('member-1');
+
+      await expectReject(
+        services.getTrtcRoomEventsSummaryById({ id: 'stranger' }, { id: conference.id }),
+        'Only the conference creator or master can view room events'
+      );
+      await expectReject(
+        services.getTrtcRoomEventsSummaryForOpenApi({ id: 'other-owner' }, { id: conference.id }),
+        'Data has expired, please refresh the page and try again'
+      );
     });
 
     it('should record client trtc events and update instance user list', async () => {
