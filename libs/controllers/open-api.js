@@ -136,6 +136,26 @@ module.exports = fp(async (fastify, options) => {
   );
 
   fastify.get(
+    `${options.prefix}/open-api/roomEventsSummary`,
+    {
+      onRequest: [openApiAuthenticate],
+      schema: {
+        summary: '获取会议TRTC房间事件聚合摘要',
+        query: {
+          type: 'object',
+          properties: {
+            id: { type: 'string' }
+          },
+          required: ['id']
+        }
+      }
+    },
+    async request => {
+      return services.getTrtcRoomEventsSummaryForOpenApi(request.openApiPayload, request.query);
+    }
+  );
+
+  fastify.get(
     `${options.prefix}/open-api/aiTranscriptionContent`,
     {
       onRequest: [openApiAuthenticate],
