@@ -387,7 +387,9 @@ module.exports = fp(async (fastify, options) => {
               description: '会议选项',
               properties: {
                 document: { type: 'array', description: '会议输入文档', items: { type: 'object' } },
-                documentVisibleAll: { type: 'boolean', description: '是否允许所有人查看文档', default: false }
+                documentVisibleAll: { type: 'boolean', description: '是否允许所有人查看文档', default: false },
+                allowEarlyEnter: { type: 'boolean', description: '是否允许提前进入房间', default: false },
+                forceExitGrace: { type: 'number', minimum: 0, description: '计划结束时间之后再等待的分钟数，到时强制结束会议。0 表示到点立即结束' }
               }
             }
           },
