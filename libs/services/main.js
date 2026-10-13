@@ -9,8 +9,23 @@ module.exports = fp(async (fastify, options) => {
   const { models } = fastify[options.name];
   const trtc = fastify.trtc.services;
 
+  const getForceExitGraceMinutes = conference => {
+    const grace = conference.options?.forceExitGrace;
+    if (grace === undefined || grace === null || grace === '') {
+      return 0;
+    }
+    const minutes = Number(grace);
+    if (!Number.isFinite(minutes) || minutes < 0) {
+      return 0;
+    }
+    return minutes;
+  };
+
   const isConferenceEndTimePassed = conference => {
-    return conference.startTime && conference.duration && dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'second')));
+    if (!(conference.startTime && conference.duration)) {
+      return false;
+    }
+    return dayjs().isAfter(dayjs(conference.startTime).add(dayjs.duration(conference.duration, 'second')).add(getForceExitGraceMinutes(conference), 'minute'));
   };
 
   const isConferenceExpired = conference => {
@@ -801,7 +816,7 @@ module.exports = fp(async (fastify, options) => {
     const conference = await getConference({ id: conferenceId, status: 0 });
     const member = await getMember({ id, conferenceId });
 
-    if (conference.startTime && dayjs().isBefore(dayjs(conference.startTime))) {
+    if (conference.startTime && dayjs().isBefore(dayjs(conference.startTime)) && conference.options?.allowEarlyEnter !== true) {
       throw new Error('The conference has not yet started');
     }
 

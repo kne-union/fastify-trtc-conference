@@ -99,6 +99,8 @@ options 子项：
 | setting            | `object`  | 否  | -       | TRTC 房间设置（record、speech 等） |
 | document           | `array`   | 否  | -       | 会议输入文档                     |
 | documentVisibleAll | `boolean` | 否  | `false` | 是否允许所有人查看文档                |
+| allowEarlyEnter    | `boolean` | 否  | `false` | 是否允许在开始时间之前进入房间            |
+| forceExitGrace     | `number`  | 否  | `0`     | 计划结束时间之后再等待的分钟数，到时强制结束会议。`0` 表示到点立即结束 |
 
 返回：会议对象及成员列表（含 shorten 码）
 
@@ -140,7 +142,7 @@ options 子项：
 
 ##### POST `/api/conference/enter`
 
-参会人进入会议，获取 TRTC 用户签名。如果是主持人首次进入且会议开启了录像，将自动开始录像。
+参会人进入会议，获取 TRTC 用户签名。未到开始时间时默认拒绝进入；`options.allowEarlyEnter` 为 `true` 时允许提前进入。超过计划结束时间加 `options.forceExitGrace` 分钟后视为已结束。如果是主持人首次进入且会议开启了录像，将自动开始录像。
 
 返回：
 

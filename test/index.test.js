@@ -610,6 +610,33 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(conferences.get(conference.id).destroyed).to.be.true;
     });
 
+    it('should keep a conference open during the force-exit grace and end it after the grace', async () => {
+      const { services, conferences } = await createServiceContext();
+      const withinGrace = createEntity({
+        id: 'within-grace',
+        userId: 'user-1',
+        status: 0,
+        startTime: new Date(Date.now() - 2 * 60 * 1000),
+        duration: 60,
+        options: { forceExitGrace: 10 }
+      });
+      const pastGrace = createEntity({
+        id: 'past-grace',
+        userId: 'user-1',
+        status: 0,
+        startTime: new Date(Date.now() - 20 * 60 * 1000),
+        duration: 60,
+        options: { forceExitGrace: 10 }
+      });
+      conferences.set(withinGrace.id, withinGrace);
+      conferences.set(pastGrace.id, pastGrace);
+
+      await services.forceEndExpiredConferences();
+
+      expect(withinGrace.status).to.equal(0);
+      expect(pastGrace.status).to.equal(1);
+    });
+
     it('should list conferences and force end expired ones with cleanup', async () => {
       const { services, conferences, calls } = await createServiceContext();
       const oldConference = createEntity({ id: 'old', userId: 'user-1', status: 0, startTime: new Date(Date.now() - 60 * 60 * 1000), duration: 1, options: {} });
@@ -897,6 +924,10 @@ describe('@kne/fastify-trtc-conference', function () {
 
       conference.startTime = new Date(Date.now() + 60 * 1000);
       await expectReject(services.enterConference({ id: member.id, conferenceId: conference.id }), 'The conference has not yet started');
+
+      conference.options = Object.assign({}, conference.options, { allowEarlyEnter: true });
+      const earlyResult = await services.enterConference({ id: member.id, conferenceId: conference.id, isMaster: true });
+      expect(earlyResult.sign).to.deep.equal({ sdkAppId: 1400000000, userId: member.id, userSig: 'mock-user-sig' });
     });
 
     it('should set audio or video stream type when starting record', async () => {
