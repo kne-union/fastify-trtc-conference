@@ -341,19 +341,22 @@ describe('@kne/fastify-trtc-conference', function () {
           }
         },
         signature: { authenticate: { openApi: 'open-api-authenticate' } },
-        account: { authenticate: { user: 'user-authenticate' }, models: { user: 'user-model' } }
+        account: { authenticate: { user: 'user-authenticate' }, models: { user: 'user-model' } },
+        trtcConferenceShorten: { authenticate: { code: 'shorten-code' } }
       };
       fastify.after = callback => callback();
 
       await plugin(fastify, { name: 'conference', tencentcloud: { credential: { secretId: 'sid', secretKey: 'skey' }, cos: { region: 'ap', bucket: 'bucket' } } });
 
       const namespaceOptions = registrations[2].options.options;
-      expect(registrations).to.have.length(3);
+      expect(registrations).to.have.length(5);
       expect(registrations[0].options.name).to.equal('trtc');
       expect(registrations[0].options.credential).to.deep.equal({ secretId: 'sid', secretKey: 'skey' });
       expect(registrations[0].options.cos).to.deep.equal({ accessKeyId: 'sid', accessKeySecret: 'skey', region: 'ap', bucket: 'bucket' });
       expect(registrations[1].options.name).to.equal('trtcConferenceShorten');
       expect(registrations[2].options.name).to.equal('conference');
+      expect(registrations[4].options.prefix).to.equal('/api/im');
+      expect(registrations[4].options.trtc.authenticate).to.deep.equal(['shorten-code']);
       expect(cronJobs[0]).to.include({ name: 'conference:forceEndExpiredConferences', cronTime: '*/5 * * * *', startWhenReady: true });
       expect(namespaceOptions.getOpenApiAuthenticate()).to.equal('open-api-authenticate');
       expect(namespaceOptions.getUserAuthenticate()).to.equal('user-authenticate');
@@ -381,11 +384,14 @@ describe('@kne/fastify-trtc-conference', function () {
       let namespaceOptions;
       const fastify = {
         register: (target, options) => {
-          namespaceOptions = options.options || namespaceOptions;
+          if (options && options.options) {
+            namespaceOptions = options.options;
+          }
         },
         sequelize: { addModels: async () => [] },
         cron: { createJob: () => {} },
         task: { services: { append: () => {} } },
+        trtcConferenceShorten: { authenticate: { code: 'shorten-code' } },
         after: callback => callback()
       };
       await plugin(fastify, {});

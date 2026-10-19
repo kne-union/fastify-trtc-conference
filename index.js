@@ -1,6 +1,7 @@
 const fp = require('fastify-plugin');
 const path = require('node:path');
 const get = require('lodash/get');
+const { assertActiveMember } = require('./libs/im');
 
 module.exports = fp(
   async (fastify, options) => {
@@ -86,6 +87,47 @@ module.exports = fp(
         ],
         ['services', path.resolve(__dirname, './libs/services')]
       ]
+    });
+
+    const imPrefix = options.imPrefix || String(options.prefix).replace(/\/conference\/?$/, '/im');
+
+    fastify.after(() => {
+      const codeAuthenticate = fastify[options.shortenName].authenticate.code;
+      fastify.register(require('@fastify/websocket'));
+      fastify.register(require('@kne/fastify-im'), {
+        prefix: imPrefix,
+        dbTableNamePrefix: options.dbTableNamePrefix,
+        verifyToken: async token => {
+          try {
+            const decoded = JSON.parse(await fastify[options.shortenName].services.decode(token));
+            if (!decoded || decoded.target !== 'im' || !decoded.conversationId || !decoded.memberId) {
+              return null;
+            }
+            const member = await fastify.im.services.conversation.getMemberById(decoded.memberId);
+            if (!member || String(member.conversationId) !== String(decoded.conversationId) || member.leftAt) {
+              return null;
+            }
+            return {
+              userId: `guest_${member.id}`,
+              memberId: member.id,
+              conversationId: String(member.conversationId),
+              role: member.role,
+              nickname: member.nickname,
+              avatar: member.avatar || '',
+              isGuest: true
+            };
+          } catch (error) {
+            return null;
+          }
+        },
+        trtc: {
+          authenticate: [codeAuthenticate],
+          resolveUser: async request => {
+            const { memberId } = await assertActiveMember(fastify, options, request);
+            return `im_${memberId}`;
+          }
+        }
+      });
     });
 
     fastify.after(() => {
