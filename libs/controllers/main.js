@@ -38,7 +38,7 @@ module.exports = fp(async (fastify, options) => {
         headers: {
           type: 'object',
           properties: {
-            [options.shortenHeaderName]: { type: 'string', description: '邀请码，query.code 未传时使用' }
+            [options.shortenHeaderName]: { description: '邀请码，query.code 未传时使用' }
           }
         },
         response: success(
