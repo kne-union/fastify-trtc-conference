@@ -547,7 +547,14 @@ describe('@kne/fastify-trtc-conference', function () {
 
       expect(health).to.deep.equal({ success: true, userInfo: { id: 'open-api-user' }, message: 'openApi服务正常' });
       expect(routes.every(route => route.config.onRequest[0] === openApiAuthenticate)).to.be.true;
-      expect(serviceCalls.map(call => call.name)).to.deep.equal(['createConference', 'getConferenceDetailById', 'cancelConference', 'getAiTranscriptionContentById', 'getConferenceRoomStatusById', 'getTrtcRoomEventsSummaryForOpenApi']);
+      expect(serviceCalls.map(call => call.name)).to.deep.equal([
+        'createConference',
+        'getConferenceDetailById',
+        'cancelConference',
+        'getAiTranscriptionContentById',
+        'getConferenceRoomStatusById',
+        'getTrtcRoomEventsSummaryForOpenApi'
+      ]);
     });
   });
 
@@ -788,7 +795,10 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(dateResult.totalCount).to.equal(2);
       expect(dateResult.pageData.map(item => item.id)).to.deep.equal(['other-name', 'match']);
 
-      const combinedResult = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1, keyword: '产品', date: '2026-06-05' });
+      const combinedResult = await services.getConferenceList(
+        { id: 'user-1' },
+        { perPage: 20, currentPage: 1, keyword: '产品', date: '2026-06-05' }
+      );
       expect(combinedResult.totalCount).to.equal(1);
       expect(combinedResult.pageData[0].id).to.equal('match');
 
@@ -800,7 +810,10 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(speechResult.totalCount).to.equal(2);
       expect(speechResult.pageData.map(item => item.id)).to.deep.equal(['other-date', 'other-name']);
 
-      const settingResult = await services.getConferenceList({ id: 'user-1' }, { perPage: 20, currentPage: 1, record: 'video', speech: true });
+      const settingResult = await services.getConferenceList(
+        { id: 'user-1' },
+        { perPage: 20, currentPage: 1, record: 'video', speech: true }
+      );
       expect(settingResult.totalCount).to.equal(1);
       expect(settingResult.pageData[0].id).to.equal('match');
     });
@@ -1173,11 +1186,20 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(resultByMemberId).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
 
       // userAuthenticate 真实场景：payload.id 是账号 id，通过邮箱匹配主持人
-      const resultByEmail = await services.getTrtcInstanceEventsById({ id: 'account-master', email: 'master@test.com' }, { id: conference.id });
+      const resultByEmail = await services.getTrtcInstanceEventsById(
+        { id: 'account-master', email: 'master@test.com' },
+        { id: conference.id }
+      );
       expect(resultByEmail).to.deep.equal({ pageData: [{ id: 'event-1' }], totalCount: 1 });
 
-      await expectReject(services.getTrtcInstanceEventsById({ id: 'account-attendee', email: 'attendee@test.com' }, { id: conference.id }), 'Only the conference creator or master can view room events');
-      await expectReject(services.getTrtcInstanceEventsById({ id: 'unknown-user' }, { id: conference.id }), 'Only the conference creator or master can view room events');
+      await expectReject(
+        services.getTrtcInstanceEventsById({ id: 'account-attendee', email: 'attendee@test.com' }, { id: conference.id }),
+        'Only the conference creator or master can view room events'
+      );
+      await expectReject(
+        services.getTrtcInstanceEventsById({ id: 'unknown-user' }, { id: conference.id }),
+        'Only the conference creator or master can view room events'
+      );
     });
 
     it('should sync trtc instance events when list is empty', async () => {
@@ -1312,8 +1334,14 @@ describe('@kne/fastify-trtc-conference', function () {
       expect(openApiResult.conferenceMembers).to.deep.equal(conference.members);
       expect(openApiResult.members[0].userId).to.equal('member-1');
 
-      await expectReject(services.getTrtcRoomEventsSummaryById({ id: 'stranger' }, { id: conference.id }), 'Only the conference creator or master can view room events');
-      await expectReject(services.getTrtcRoomEventsSummaryForOpenApi({ id: 'other-owner' }, { id: conference.id }), 'Data has expired, please refresh the page and try again');
+      await expectReject(
+        services.getTrtcRoomEventsSummaryById({ id: 'stranger' }, { id: conference.id }),
+        'Only the conference creator or master can view room events'
+      );
+      await expectReject(
+        services.getTrtcRoomEventsSummaryForOpenApi({ id: 'other-owner' }, { id: conference.id }),
+        'Data has expired, please refresh the page and try again'
+      );
     });
 
     it('should record client trtc events and update instance user list', async () => {
