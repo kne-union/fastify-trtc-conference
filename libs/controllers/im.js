@@ -1,5 +1,6 @@
 const fp = require('fastify-plugin');
 const { assertActiveMember, conversationName, memberEmailKey } = require('../im');
+const { str, obj, success } = require('../schemas/response');
 
 module.exports = fp(async (fastify, options) => {
   const { authenticate } = fastify[options.shortenName];
@@ -9,8 +10,18 @@ module.exports = fp(async (fastify, options) => {
     {
       onRequest: [authenticate.code],
       schema: {
-        description: '进入当前会议的群聊。等待页与会中共用同一会话，参会人用邀请码身份加入。',
-        summary: '获取会议 IM 会话'
+        tags: ['会议-IM'],
+        description: '进入当前会议的群聊。等待页与会中共用同一会话，参会人用邀请码身份加入。会话或 IM 成员不存在时自动创建，已离开的成员会重新加入；返回有效期 7 天的 WebSocket 令牌。',
+        summary: '获取会议 IM 会话',
+        response: success(
+          '会议群聊会话信息',
+          obj('会议群聊会话信息', {
+            conversationId: str('IM 会话 ID'),
+            memberId: str('当前参会人在 IM 会话中的成员 ID'),
+            wsToken: str('连接 IM WebSocket 用的令牌，有效期 7 天'),
+            nickname: str('在群聊中显示的昵称')
+          })
+        )
       }
     },
     async request => {

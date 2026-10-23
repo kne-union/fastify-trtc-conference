@@ -558,6 +558,68 @@ describe('@kne/fastify-trtc-conference', function () {
     });
   });
 
+  describe('创建会议字段白名单', () => {
+    const createBody = {
+      name: 'Daily',
+      duration: 30,
+      includingMe: false,
+      userId: 'attacker',
+      status: 2,
+      members: [{ name: 'Host', nickname: 'Host', email: 'host@test.com', isMaster: true, avatar: 'host.png', attended: true, shorten: 'forged', id: '999', conferenceId: 'other', createdAt: '2000-01-01T00:00:00.000Z' }]
+    };
+
+    it('should drop undeclared conference and member fields in user and open api create routes', async () => {
+      for (const [file, request] of [
+        ['../libs/controllers/main', { userInfo: { id: 'user-1' } }],
+        ['../libs/controllers/open-api', { openApiPayload: { id: 'open-api-user' } }]
+      ]) {
+        const routes = [];
+        const serviceCalls = [];
+        await require(file)(
+          {
+            conference: {
+              services: new Proxy(
+                {},
+                {
+                  get:
+                    (target, name) =>
+                    async (...args) =>
+                      serviceCalls.push({ name, args })
+                }
+              )
+            },
+            shorten: { authenticate: { code: async () => {} } },
+            get: (url, config, handler) => routes.push({ url, handler }),
+            post: (url, config, handler) => routes.push({ url, handler })
+          },
+          { name: 'conference', shortenName: 'shorten', prefix: '/api/conference', getUserAuthenticate: () => async () => {}, getOpenApiAuthenticate: () => async () => {}, getUserInfo: request => request.userInfo }
+        );
+        await routes.find(route => /\/create$/.test(route.url)).handler(Object.assign({ body: createBody }, request));
+        const body = serviceCalls.find(call => call.name === 'createConference').args[1];
+        expect(body).to.deep.equal({
+          name: 'Daily',
+          duration: 30,
+          includingMe: false,
+          members: [{ name: 'Host', nickname: 'Host', email: 'host@test.com', isMaster: true, avatar: 'host.png' }]
+        });
+      }
+    });
+
+    it('should not write attended or shorten from request members but keep normal member fields', async () => {
+      const pickCreateBody = require('../libs/pick-create-body');
+      const { services, members } = await createServiceContext();
+      const result = await services.createConference({ id: 'user-1' }, pickCreateBody(createBody));
+
+      expect(result.userId).to.equal('user-1');
+      const [member] = Array.from(members.values());
+      expect(member).to.include({ nickname: 'Host', email: 'host@test.com', isMaster: true, conferenceId: result.id });
+      expect(member.attended).to.equal(undefined);
+      expect(member.createdAt).to.equal(undefined);
+      expect(member.id).to.not.equal('999');
+      expect(member.shorten).to.not.equal('forged');
+    });
+  });
+
   describe('服务层会议测试', () => {
     it('should create conference, include current user and sign members', async () => {
       const { services, members, signedPayloads } = await createServiceContext();
