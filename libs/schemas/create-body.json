@@ -30,7 +30,7 @@
     },
     "members": {
       "type": "array",
-      "description": "会议成员",
+      "description": "会议成员，每项只保存下列声明的字段，其它字段（如 attended、shorten）会被忽略",
       "default": [],
       "items": {
         "type": "object",

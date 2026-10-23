@@ -1,5 +1,6 @@
 const fp = require('fastify-plugin');
 const createBodySchema = require('../schemas/create-body.json');
+const pickCreateBody = require('../pick-create-body');
 const { str, num, any, list, obj, success, empty, member, conference, conferenceDetail, transcription, shorten, inviter, instanceEventList, roomEventsSummary } = require('../schemas/response');
 
 const MEMBER_TAG = '会议-参会人';
@@ -461,7 +462,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.createConference(options.getUserInfo(request), request.body);
+      return services.createConference(options.getUserInfo(request), pickCreateBody(request.body));
     }
   );
 
