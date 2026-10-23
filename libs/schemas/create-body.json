@@ -2,7 +2,8 @@
   "type": "object",
   "properties": {
     "name": {
-      "type": "string"
+      "type": "string",
+      "description": "会议名称"
     },
     "startTime": {
       "type": "string",
@@ -20,6 +21,12 @@
     "maxCount": {
       "type": "number",
       "description": "最大人数"
+    },
+    "includingMe": {
+      "description": "是否把当前调用者（用户或开放接口调用方）作为主持人加入会议；为 false 时 members 中至少要有一个主持人"
+    },
+    "origin": {
+      "description": "会议来源，如 system-created、co-interview，不传使用默认值 system-created"
     },
     "members": {
       "type": "array",
@@ -43,6 +50,9 @@
           "isMaster": {
             "type": "boolean",
             "description": "是否是主持人"
+          },
+          "avatar": {
+            "description": "头像，http(s) 地址会被转存到文件服务后保存文件 ID"
           }
         }
       }
@@ -53,7 +63,7 @@
       "properties": {
         "document": {
           "type": "array",
-          "description": "会议输入文档",
+          "description": "会议输入文档，每项为 { id, filename } 或 { url, filename }，http(s) url 会被转存到文件服务",
           "items": {
             "type": "object"
           }
@@ -72,6 +82,12 @@
           "type": "number",
           "minimum": 0,
           "description": "计划结束时间之后再等待的分钟数，到时强制结束会议。0 表示到点立即结束"
+        },
+        "allowExtend": {
+          "description": "是否允许主持人在会中延长会议时长"
+        },
+        "setting": {
+          "description": "TRTC 设置：record（录制类型 audio / video）、speech（是否开启 AI 语音转写）、language、hotWordList 等，透传给 fastify-trtc"
         }
       }
     }
