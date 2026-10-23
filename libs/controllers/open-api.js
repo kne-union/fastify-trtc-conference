@@ -1,5 +1,6 @@
 const fp = require('fastify-plugin');
 const createBodySchema = require('../schemas/create-body.json');
+const pickCreateBody = require('../pick-create-body');
 const { str, bool, any, list, obj, success, empty, member, conference, conferenceDetail, transcription, conferenceSummaryFields, instanceEventList, roomEventsSummary } = require('../schemas/response');
 
 const TAG = '会议-开放接口';
@@ -50,7 +51,7 @@ module.exports = fp(async (fastify, options) => {
       }
     },
     async request => {
-      return services.createConference(request.openApiPayload, request.body);
+      return services.createConference(request.openApiPayload, pickCreateBody(request.body));
     }
   );
 
